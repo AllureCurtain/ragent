@@ -14,14 +14,13 @@ temp
 .sts4-cache
 
 ### IntelliJ IDEA ###
-.idea
-!.idea/dictionaries/
-!.idea/inspectionProfiles/
-!.idea/scopes/
-!.idea/icon.png
+.idea/
 *.iws
 *.iml
 *.ipr
+
+### Local agent worktrees ###
+.claude/worktrees/
 
 ### NetBeans ###
 /nbproject/private/
