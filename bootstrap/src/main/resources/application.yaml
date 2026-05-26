@@ -57,7 +57,7 @@ rag:
   rate-limit:
     global:
       enabled: true
-      max-concurrent: 1
+      max-concurrent: 10
       max-wait-seconds: 15
       lease-seconds: 30
       poll-interval-ms: 200
@@ -156,9 +156,9 @@ ai:
         model: Pro/zai-org/GLM-4.7
         supports-thinking: true
         priority: 4
-      - id: gpt-5-mini
+      - id: gpt-5.4
         provider: aihubmix
-        model: gpt-5-mini
+        model: gpt-5.4
         priority: 5
 
   embedding:
