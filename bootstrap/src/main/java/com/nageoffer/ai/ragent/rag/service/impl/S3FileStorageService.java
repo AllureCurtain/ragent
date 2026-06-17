@@ -37,6 +37,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Proxy;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -172,7 +173,7 @@ public class S3FileStorageService implements FileStorageService {
                                           InputStream inputStream,
                                           long size,
                                           String contentType) throws IOException {
-        HttpURLConnection conn = (HttpURLConnection) presignedReq.url().openConnection();
+        HttpURLConnection conn = (HttpURLConnection) presignedReq.url().openConnection(Proxy.NO_PROXY);
         try {
             conn.setDoOutput(true);
             conn.setRequestMethod("PUT");

@@ -9,12 +9,18 @@
 
 依赖：``pip install ragas langchain-openai datasets``
 
-环境变量（必填）：
-    AIHUBMIX_API_KEY     aihubmix 的 API Key
-环境变量（可选）：
-    AIHUBMIX_BASE_URL    默认 https://aihubmix.com/v1
-    JUDGE_MODEL          默认 gpt-5.4-mini
-    EMBEDDING_MODEL      默认 text-embedding-3-large
+环境变量（推荐）：
+    SILICONFLOW_API_KEY  使用硅基流动同时作为 judge 和 embedding provider
+    JUDGE_API_KEY        judge 模型 API Key；未设置时可用 SILICONFLOW_API_KEY
+    JUDGE_BASE_URL       judge OpenAI-compatible base URL
+    JUDGE_MODEL          默认 deepseek-ai/DeepSeek-V3.2（硅基流动）或 gpt-5.4-mini（旧版 AIHubMix）
+    EMBEDDING_API_KEY    embedding API Key；未设置时可用 SILICONFLOW_API_KEY
+    EMBEDDING_BASE_URL   embedding base URL；默认 https://api.siliconflow.cn/v1
+    EMBEDDING_MODEL      默认 Qwen/Qwen3-Embedding-8B
+环境变量（旧版兼容）：
+    AIHUBMIX_API_KEY / AIHUBMIX_BASE_URL
+        未配置拆分变量时，同时作为 judge 和 embedding provider；
+        embedding 默认 text-embedding-3-large。
 
 样本过滤：只评 response / retrieved_contexts / reference 三项齐全且 final_status=success
 的样本，其余记 skip_reason 到 meta，不参与均值。
@@ -23,8 +29,10 @@ from __future__ import annotations
 
 import os
 import sys
+import types
 import warnings
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 from eval.common.schemas import EvalRecord, MetricResult
@@ -40,6 +48,93 @@ RAGAS_METRIC_KEYS = (
 )
 
 _REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+DEFAULT_LEGACY_BASE_URL = "https://aihubmix.com/v1"
+DEFAULT_JUDGE_MODEL = "gpt-5.4-mini"
+DEFAULT_LEGACY_EMBEDDING_MODEL = "text-embedding-3-large"
+DEFAULT_SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1"
+DEFAULT_SILICONFLOW_JUDGE_MODEL = "deepseek-ai/DeepSeek-V3.2"
+DEFAULT_SILICONFLOW_EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-8B"
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    judge_api_key: str
+    judge_base_url: str
+    judge_model: str
+    embedding_api_key: str
+    embedding_base_url: str
+    embedding_model: str
+
+
+def _env(name: str) -> str | None:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _load_provider_config() -> ProviderConfig:
+    """Load split judge/embedding provider config with legacy AIHUBMIX fallback."""
+    legacy_api_key = _env("AIHUBMIX_API_KEY")
+    legacy_base_url = _env("AIHUBMIX_BASE_URL") or DEFAULT_LEGACY_BASE_URL
+    siliconflow_api_key = _env("SILICONFLOW_API_KEY")
+    siliconflow_base_url = _env("SILICONFLOW_BASE_URL") or DEFAULT_SILICONFLOW_BASE_URL
+
+    judge_api_key = _env("JUDGE_API_KEY") or siliconflow_api_key or legacy_api_key
+    if not judge_api_key:
+        raise RuntimeError(
+            "缺少环境变量 JUDGE_API_KEY / SILICONFLOW_API_KEY"
+            "（或旧版 AIHUBMIX_API_KEY），"
+            "RAGAS LLM-judge 调用所需"
+        )
+    if _env("JUDGE_BASE_URL"):
+        judge_base_url = _env("JUDGE_BASE_URL")
+    elif siliconflow_api_key:
+        judge_base_url = siliconflow_base_url
+    else:
+        judge_base_url = legacy_base_url
+    judge_model = (
+        _env("JUDGE_MODEL")
+        or (DEFAULT_SILICONFLOW_JUDGE_MODEL if siliconflow_api_key else DEFAULT_JUDGE_MODEL)
+    )
+
+    embedding_api_key = _env("EMBEDDING_API_KEY") or siliconflow_api_key
+    if embedding_api_key:
+        embedding_base_url = (
+            _env("EMBEDDING_BASE_URL")
+            or siliconflow_base_url
+        )
+        embedding_model = _env("EMBEDDING_MODEL") or DEFAULT_SILICONFLOW_EMBEDDING_MODEL
+    elif legacy_api_key:
+        embedding_api_key = legacy_api_key
+        embedding_base_url = legacy_base_url
+        embedding_model = _env("EMBEDDING_MODEL") or DEFAULT_LEGACY_EMBEDDING_MODEL
+    else:
+        raise RuntimeError(
+            "缺少环境变量 EMBEDDING_API_KEY / SILICONFLOW_API_KEY"
+            "（或旧版 AIHUBMIX_API_KEY），RAGAS embedding 调用所需"
+        )
+
+    return ProviderConfig(
+        judge_api_key=judge_api_key,
+        judge_base_url=judge_base_url,
+        judge_model=judge_model,
+        embedding_api_key=embedding_api_key,
+        embedding_base_url=embedding_base_url,
+        embedding_model=embedding_model,
+    )
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = _env(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"环境变量 {name} 必须是整数，当前值：{raw}") from exc
 
 
 def filter_evaluable(records: list[EvalRecord]) -> tuple[list[EvalRecord], list[tuple[str, str]]]:
@@ -87,10 +182,30 @@ def _is_reasoning_model(model: str) -> bool:
     return any(family.startswith(prefix) for prefix in _REASONING_MODEL_PREFIXES)
 
 
+def _install_ragas_langchain_compat() -> None:
+    """Patch optional VertexAI import expected by ragas 0.2.x on newer LangChain."""
+    module_name = "langchain_community.chat_models.vertexai"
+    if module_name in sys.modules:
+        return
+    try:
+        __import__(module_name)
+        return
+    except ModuleNotFoundError:
+        module = types.ModuleType(module_name)
+
+        class ChatVertexAI:  # noqa: D401 - import shim only
+            """Compatibility placeholder for an optional integration we do not use."""
+
+        module.ChatVertexAI = ChatVertexAI
+        sys.modules[module_name] = module
+
+
 def _build_judges(
-    api_key: str,
-    base_url: str,
+    judge_api_key: str,
+    judge_base_url: str,
     judge_model: str,
+    embedding_api_key: str,
+    embedding_base_url: str,
     emb_model: str,
     timeout: int = 900,
     use_json_mode: bool = True,
@@ -99,8 +214,8 @@ def _build_judges(
 
     judge_kwargs: dict[str, Any] = {
         "model": judge_model,
-        "api_key": api_key,
-        "base_url": base_url,
+        "api_key": judge_api_key,
+        "base_url": judge_base_url,
         "max_retries": 3,
         "timeout": timeout,
     }
@@ -115,8 +230,8 @@ def _build_judges(
     )
     emb = OpenAIEmbeddings(
         model=emb_model,
-        api_key=api_key,
-        base_url=base_url,
+        api_key=embedding_api_key,
+        base_url=embedding_base_url,
         timeout=timeout,
     )
     return judge, emb
@@ -126,6 +241,7 @@ def _build_metrics(judge_model: str) -> list[Any]:
     """RAGAS metric 对象会在 evaluate() 中被临时写入 llm/embeddings，不能跨线程共享。"""
     import copy
 
+    _install_ragas_langchain_compat()
     from ragas.metrics import (
         answer_correctness,
         answer_relevancy,
@@ -150,25 +266,37 @@ def _build_metrics(judge_model: str) -> list[Any]:
 
 def _run(
     records: list[EvalRecord],
-    api_key: str,
-    base_url: str,
+    config: ProviderConfig,
     judge_model: str,
     emb_model: str,
     timeout: int = 900,
 ) -> Any:
     import pandas as pd
+
+    _install_ragas_langchain_compat()
     from ragas import evaluate
 
     try:
         from ragas.run_config import RunConfig
 
-        run_config = RunConfig(max_retries=2, timeout=timeout)
+        run_config = RunConfig(
+            max_retries=_env_int("RAGAS_MAX_RETRIES", 2),
+            timeout=timeout,
+            max_wait=_env_int("RAGAS_MAX_WAIT", 70),
+            max_workers=_env_int("RAGAS_MAX_WORKERS", 1),
+        )
     except Exception:
         run_config = None
 
     def _do_eval(recs: list[EvalRecord], use_json_mode: bool) -> Any:
         judge, emb = _build_judges(
-            api_key, base_url, judge_model, emb_model, timeout,
+            config.judge_api_key,
+            config.judge_base_url,
+            judge_model,
+            config.embedding_api_key,
+            config.embedding_base_url,
+            emb_model,
+            timeout,
             use_json_mode=use_json_mode,
         )
         kwargs: dict[str, Any] = {
@@ -180,6 +308,7 @@ def _run(
         }
         if run_config is not None:
             kwargs["run_config"] = run_config
+        kwargs["batch_size"] = _env_int("RAGAS_BATCH_SIZE", 1)
         return evaluate(**kwargs)
 
     # 第一层：batch + JSON mode
@@ -232,16 +361,13 @@ def compute(
     """主入口。返回 5 个 MetricResult。
 
     n_runs > 1 时并发跑 N 次取均值，压制 LLM judge 的单次方差。
-    AIHUBMIX_API_KEY 缺失时直接报错，不再走兜底硬编码 key。
+    支持 JUDGE_* 与 EMBEDDING_* 分别配置；AIHUBMIX_* 仅作为旧版兼容。
     """
     import concurrent.futures
 
-    api_key = os.environ.get("AIHUBMIX_API_KEY")
-    if not api_key:
-        raise RuntimeError("缺少环境变量 AIHUBMIX_API_KEY（RAGAS LLM-judge 调用所需）")
-    base_url = os.environ.get("AIHUBMIX_BASE_URL", "https://aihubmix.com/v1")
-    judge_model = os.environ.get("JUDGE_MODEL", "gpt-5.4-mini")
-    emb_model = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-large")
+    provider_config = _load_provider_config()
+    judge_model = provider_config.judge_model
+    emb_model = provider_config.embedding_model
 
     evaluable, skipped = filter_evaluable(records)
     if limit is not None:
@@ -254,16 +380,19 @@ def compute(
     if skipped:
         for reason, count in Counter(r for _, r in skipped).most_common():
             print(f"  - {reason}: {count}")
-    print(f"  judge={judge_model}  embedding={emb_model}  via {base_url}")
+    print(
+        f"  judge={judge_model} via {provider_config.judge_base_url}  "
+        f"embedding={emb_model} via {provider_config.embedding_base_url}"
+    )
 
     # 并发跑 N 次
     if n_runs <= 1:
-        dfs = [_run(evaluable, api_key, base_url, judge_model, emb_model).to_pandas()]
+        dfs = [_run(evaluable, provider_config, judge_model, emb_model).to_pandas()]
     else:
         print(f"  RAGAS: running {n_runs} passes concurrently for score averaging ...")
         with concurrent.futures.ThreadPoolExecutor(max_workers=n_runs) as ex:
             futures = [
-                ex.submit(_run, evaluable, api_key, base_url, judge_model, emb_model)
+                ex.submit(_run, evaluable, provider_config, judge_model, emb_model)
                 for _ in range(n_runs)
             ]
             dfs = [f.result().to_pandas() for f in futures]
@@ -316,8 +445,7 @@ def compute(
             try:
                 retry_df = _run(
                     [record],
-                    api_key,
-                    base_url,
+                    provider_config,
                     judge_model,
                     emb_model,
                     timeout=1200,
@@ -354,7 +482,9 @@ def compute(
                     "n_runs": n_runs,
                     "judge_model": judge_model,
                     "embedding_model": emb_model,
-                    "base_url": base_url,
+                    "base_url": provider_config.judge_base_url,
+                    "judge_base_url": provider_config.judge_base_url,
+                    "embedding_base_url": provider_config.embedding_base_url,
                 },
             )
         )

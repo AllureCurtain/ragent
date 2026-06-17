@@ -16,8 +16,8 @@ spring:
     driver-class-name: org.postgresql.Driver
     type: com.zaxxer.hikari.HikariDataSource
     username: postgres
-    password: postgres
-    url: jdbc:postgresql://127.0.0.1:5432/ragent?client_encoding=UTF8
+    password: pg20260527
+    url: jdbc:postgresql://100.67.140.111:5432/ragent?client_encoding=UTF8
     hikari:
       connection-timeout: 5000
       idle-timeout: 600000
@@ -30,13 +30,14 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6379
-      password: 123456
+#      password: 123456
 
 rocketmq:
-  name-server: 127.0.0.1:9876
+  name-server: 100.67.140.111:9876
+  client-api-timeout: 10000
   producer:
     group: ragent-producer${unique-name:}_pg
-    send-message-timeout: 2000
+    send-message-timeout: 10000
 
 milvus:
   uri: http://localhost:19530
@@ -114,19 +115,19 @@ ai:
         embedding: /v1/embeddings
     bailian:
       url: https://dashscope.aliyuncs.com
-      api-key: ${BAILIAN_API_KEY:}
+      api-key: ${BAILIAN_API_KEY:sk-d83e14c152964f0685efc1e0992ec1bd}
       endpoints:
         chat: /compatible-mode/v1/chat/completions
         rerank: /api/v1/services/rerank/text-rerank/text-rerank
     aihubmix:
       url: https://aihubmix.com
-      api-key: ${AIHUBMIX_API_KEY:}
+      api-key: ${AIHUBMIX_API_KEY:sk-Smpv52gVLgHkHEyA68B4E6FaE206451d9aB3Ba7c4cF52eBb}
       endpoints:
         chat: /v1/chat/completions
         embedding: /v1/embeddings
     siliconflow:
       url: https://api.siliconflow.cn
-      api-key: ${SILICONFLOW_API_KEY:}
+      api-key: ${SILICONFLOW_API_KEY:sk-kveksqsxypxlacazvieanzdqbovbcakrhzndhhjyeoevmvxe}
       endpoints:
         chat: /v1/chat/completions
         embedding: /v1/embeddings
@@ -197,7 +198,8 @@ ai:
         priority: 100
 
 rustfs:
-  url: http://localhost:9000
+  url: http://100.67.140.111:9000
+  # console: http://100.67.140.111:9001
   access-key-id: rustfsadmin
   secret-access-key: rustfsadmin
 

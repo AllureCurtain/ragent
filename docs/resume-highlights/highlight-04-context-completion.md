@@ -34,7 +34,7 @@
   ▼
 [Step 2] 大模型改写 + 拆分（LLM 前置）
   │  callLLMRewriteAndSplit()
-  │  输入：系统提示词 + 最近 1 到 2 轮对话历史（最多按 4 条消息窗口裁剪） + 当前问题
+  │  输入：系统提示词 + 最近 1 到 2 轮对话历史（按原始 history.size() 做 4 条窗口裁剪） + 当前问题
   │  输出：JSON { "rewrite": "...", "sub_questions": [...] }
   │
   │  示例输出：
@@ -50,7 +50,7 @@
 [Step 3] 每个子问题独立做意图识别（并行）
   │  IntentResolver.resolve()
   │  CompletableFuture 并行：每个子问题 → 意图分类 → SubQuestionIntent
-  │  全局意图总数上限 3，保证每个子问题至少有 1 个意图
+  │  目标总意图数上限 3；当子问题数不超过 3 时，每个有命中的子问题保底 1 个意图
   │
   ▼
 [Step 4] 每个子问题独立做多通道检索（并行）
@@ -131,8 +131,8 @@ return callLLMRewriteAndSplit(normalizedQuestion, userQuestion, history);
 **对话历史裁剪方式：**
 
 ```java
-// 只保留最近 4 条消息窗口（通常相当于最近 2 轮对话）
-// 过滤掉 SYSTEM 类型的摘要消息，避免浪费 token
+// 过滤 USER/ASSISTANT 后，再按原始 history.size() 计算 skip，目标是保留最近 1-2 轮对话
+// 如果 history 里包含 SYSTEM 摘要，实际保留的 USER/ASSISTANT 可能少于 4 条
 List<ChatMessage> recentHistory = history.stream()
         .filter(msg -> msg.getRole() == ChatMessage.Role.USER
                 || msg.getRole() == ChatMessage.Role.ASSISTANT)
@@ -216,9 +216,10 @@ List<CompletableFuture<SubQuestionIntent>> tasks = subQuestions.stream()
 ```
 
 **意图数上限管理（capTotalIntents）：**
-- 全局最多 3 个意图（MAX_INTENT_COUNT = 3）
-- 保证每个子问题至少保留 1 个最高分意图
+- 目标是把总意图数控制在 3 个以内（`MAX_INTENT_COUNT = 3`）
+- 当子问题数不超过 3 时，保证每个有命中的子问题至少保留 1 个最高分意图
 - 剩余名额按全局分数排名分配
+- 当前实现的边界是：如果子问题数超过 3，保底策略会优先覆盖每个子问题，实际保留数可能超过 3
 
 **最终 Prompt 编号策略（RAGPromptService）：**
 
@@ -455,8 +456,8 @@ private String buildUserQuestion(String question, List<String> subQuestions) {
 
 **第三，总意图数有限流。**
 
-系统把总意图数限制在 `MAX_INTENT_COUNT = 3`，并且保证每个子问题至少保留 1 个最高分意图，剩余名额再按全局分数分配。  
-这相当于在拆分之后再做一次成本控制。
+系统目标是把总意图数控制在 `MAX_INTENT_COUNT = 3`，并且在子问题数不超过 3 时保证每个有命中的子问题至少保留 1 个最高分意图，剩余名额再按全局分数分配。  
+需要注意一个实现边界：如果 LLM 拆出超过 3 个子问题，当前 `capTotalIntents()` 会优先做“每题保底”，实际总意图数可能超过 3。面试或复盘时不要把它描述成绝对强约束。
 
 **第四，最终问题区显式编号，保证完整性。**
 

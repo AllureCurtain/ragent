@@ -322,7 +322,8 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
 
             return new ChunkProcessResult(chunks, extractDuration, chunkDuration, embedDuration);
         } catch (Exception e) {
-            throw new RuntimeException("文档内容提取或分块失败", e);
+            String message = StrUtil.blankToDefault(e.getMessage(), e.getClass().getName());
+            throw new RuntimeException("文档内容提取或分块失败: " + e.getClass().getSimpleName() + " - " + message, e);
         }
     }
 

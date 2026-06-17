@@ -37,7 +37,7 @@ MultiChannelRetrievalEngine.retrieveKnowledgeChannels()
   │
   │     通道2：VectorGlobalSearchChannel（向量全局搜索）
   │       优先级：10（低，兜底）
-  │       启用条件：无意图 OR 最大意图分数 < 0.6 OR 单一意图分数 < 0.8
+  │       启用条件：意图定向关闭 OR 无意图 OR 最大意图分数 < 0.6 OR 单一意图分数 < 0.8
   │       策略：搜索所有知识库 collection
   │       内部并行：对多个 collection 并行检索（集合/意图级并行）
   │       TopK 倍数：3x
@@ -53,6 +53,7 @@ MultiChannelRetrievalEngine.retrieveKnowledgeChannels()
   │       同一 chunk 在多个通道出现 → 保留分数最高的
   │
   │     处理器2：RerankPostProcessor（order=10）
+  │       受 rag.rerank.enabled 控制，默认开启
   │       调用 RerankService.rerank()
   │       → RoutingRerankService（路由 + 降级）
   │       → BaiLianRerankClient（百炼重排模型 API）
@@ -81,7 +82,7 @@ ContextFormatter.formatKbContext()
 | 类名 | `IntentDirectedSearchChannel` | `VectorGlobalSearchChannel` |
 | 优先级 | 1 | 10 |
 | 作用 | **精准**：只搜意图对应的知识库 | **兜底**：搜所有知识库 |
-| 启用条件 | 有 KB 意图且分数 >= 0.4 | 无意图 OR 最大分数 < 0.6 OR 单一意图分数 < 0.8 |
+| 启用条件 | 有 KB 意图且分数 >= 0.4 | 意图定向关闭 OR 无意图 OR 最大分数 < 0.6 OR 单一意图分数 < 0.8 |
 | 内部并行 | 对多个 intent 节点并行 | 对多个 collection 并行 |
 | TopK 倍数 | 2x | 3x |
 
@@ -99,6 +100,283 @@ ContextFormatter.formatKbContext()
 | 最高分 >= 0.8 | 启用 | 不启用 |
 
 这里的 `0.8` 来自 `singleIntentSupplementThreshold`。它解决的是“只有一个中等置信意图时过早关闭全局召回”的问题：虽然最高分已经超过 `0.6`，但如果只有一个意图且没有其他候选可以互相校验，系统仍会打开全局检索做安全网。
+
+另外，当前实现里还有一个兜底边界：如果配置关闭了 `intent-directed.enabled`，`VectorGlobalSearchChannel` 会直接启用。否则在只关闭意图定向通道的情况下，可能出现没有任何检索通道可用的问题。
+
+### 3.4 意图分数到底怎么来的？
+
+意图分数不是代码里用向量距离算出来的，也不是固定规则 `if/else` 打出来的。当前实现是 **LLM 对意图树叶子节点打分，代码负责解析、排序、过滤和限流**。
+
+核心链路如下：
+
+1. `DefaultIntentClassifier.loadIntentTreeData()` 从 Redis 读取意图树；缓存没有时从 DB 加载启用节点并回填缓存。
+2. 只取叶子节点参与分类。`IntentNode.isLeaf()` 的注释也写明：叶子节点才挂知识库，叶子节点才参与意图匹配打分。
+3. `DefaultIntentClassifier.buildPrompt()` 把每个叶子节点的 `id / path / description / type / toolId / examples` 拼进 `prompt/intent-classifier.st`。
+4. LLM 返回 JSON 数组，例如 `[{"id":"biz-12306-order","score":0.88,"reason":"..."}]`。
+5. `DefaultIntentClassifier.classifyTargets()` 解析 JSON，把 `id` 映射回 `IntentNode`，按 `score` 降序排序。
+6. `IntentResolver.classifyIntents()` 再过滤 `score >= INTENT_MIN_SCORE`，当前 `INTENT_MIN_SCORE = 0.35`，并限制最多 `MAX_INTENT_COUNT = 3`。
+
+也就是说，**分数本身由 LLM 根据意图分类 prompt 和意图树描述生成**。代码不重新计算这个分数，只信任它做后续路由判断。
+
+`prompt/intent-classifier.st` 里给模型的评分口径是：
+
+| 分数区间 | 含义 |
+|---------|------|
+| `> 0.8` | 强匹配：关键实体或主题明确一致，问题场景高度吻合 |
+| `0.4~0.8` | 中等相关：部分要素匹配，但关键实体不完全一致 |
+| `< 0.4` | 弱相关：仅勉强沾边，建议返回空数组 |
+
+这里要区分两个阈值：
+
+| 阈值 | 代码位置 | 作用 |
+|------|---------|------|
+| `0.35` | `RAGConstant.INTENT_MIN_SCORE` | 意图解析阶段的候选保留线，低于它直接丢掉 |
+| `0.4` | `intent-directed.minIntentScore` | 检索阶段的定向通道启用线，KB 意图低于它不走意图定向检索 |
+| `0.6` | `vector-global.confidenceThreshold` | 最高意图分低于它时，全局检索兜底 |
+| `0.8` | `vector-global.singleIntentSupplementThreshold` | 只有一个中等置信意图时，继续打开全局检索补召回 |
+
+### 3.5 从接口到通道选择的完整例子
+
+下面这个例子不是为了证明某个固定业务答案，而是为了覆盖三种检索路径：高置信只走定向、中等置信双通道、无意图走全局兜底。
+
+用户请求：
+
+```text
+GET /rag/v3/chat?question=请帮我详细说一下：12306 的订单流程是什么？支付环节怎么处理？推荐一部周末看的电影？
+```
+
+#### 第一步：接口进入
+
+入口是 `RAGChatController.chat()`：
+
+```java
+@GetMapping(value = "/rag/v3/chat", produces = "text/event-stream;charset=UTF-8")
+public SseEmitter chat(@RequestParam String question,
+                       @RequestParam(required = false) String conversationId,
+                       @RequestParam(required = false, defaultValue = "false") Boolean deepThinking) {
+    SseEmitter emitter = new SseEmitter(ragDefaultProperties.getSseTimeoutMs());
+    ragChatService.streamChat(question, conversationId, deepThinking, emitter);
+    return emitter;
+}
+```
+
+然后 `RAGChatServiceImpl.streamChat()` 生成 `conversationId / taskId / callback`，构造 `StreamChatContext`，最后进入 `chatPipeline.execute(ctx)`。
+
+#### 第二步：归一化重写
+
+`StreamChatPipeline.execute()` 的前半段顺序是：
+
+```java
+loadMemory(ctx);
+rewriteQuery(ctx);
+resolveIntents(ctx);
+```
+
+`rewriteQuery(ctx)` 调用：
+
+```java
+RewriteResult rewriteResult = queryRewriteService.rewriteWithSplit(ctx.getQuestion(), ctx.getHistory());
+ctx.setRewriteResult(rewriteResult);
+```
+
+实际实现是 `MultiQuestionRewriteService.rewriteWithSplit()`：
+
+```java
+String normalizedQuestion = queryTermMappingService.normalize(userQuestion);
+return callLLMRewriteAndSplit(normalizedQuestion, userQuestion, history);
+```
+
+这里先走 `QueryTermMappingService.normalize()`。它会读取后台配置的术语映射，逐条执行 `QueryTermMappingUtil.applyMapping()`。例如后台配置了：
+
+| sourceTerm | targetTerm |
+|------------|------------|
+| `12306` | `12306系统` |
+
+那么问题会先从：
+
+```text
+请帮我详细说一下：12306 的订单流程是什么？支付环节怎么处理？推荐一部周末看的电影？
+```
+
+归一化成：
+
+```text
+请帮我详细说一下：12306系统 的订单流程是什么？支付环节怎么处理？推荐一部周末看的电影？
+```
+
+接着 `callLLMRewriteAndSplit()` 会加载 `prompt/user-question-rewrite.st`。这个 prompt 要求模型返回：
+
+```json
+{
+  "rewrite": "改写后的查询",
+  "should_split": true,
+  "sub_questions": ["子问题1", "子问题2"]
+}
+```
+
+在这个例子里，LLM 可能返回：
+
+```json
+{
+  "rewrite": "12306系统的订单流程、支付环节处理和周末电影推荐",
+  "should_split": true,
+  "sub_questions": [
+    "12306系统的订单流程是什么",
+    "12306系统的支付环节怎么处理",
+    "推荐一部周末看的电影"
+  ]
+}
+```
+
+`parseRewriteAndSplit()` 会把 JSON 解析成：
+
+```java
+new RewriteResult(rewrite, subs)
+```
+
+所以此时上下文里的变量大致是：
+
+```text
+rewriteResult.rewrittenQuestion =
+  "12306系统的订单流程、支付环节处理和周末电影推荐"
+
+rewriteResult.subQuestions =
+  [
+    "12306系统的订单流程是什么",
+    "12306系统的支付环节怎么处理",
+    "推荐一部周末看的电影"
+  ]
+```
+
+如果 `rag.query-rewrite.enabled=false`，代码不会调用 LLM 改写，而是走 `normalize()` + `ruleBasedSplit()`。如果 LLM 调用或 JSON 解析失败，则兜底为 `new RewriteResult(normalizedQuestion, List.of(normalizedQuestion))`。
+
+#### 第三步：对子问题做意图打分
+
+`resolveIntents(ctx)` 调用：
+
+```java
+List<SubQuestionIntent> subIntents = intentResolver.resolve(ctx.getRewriteResult());
+ctx.setSubIntents(subIntents);
+```
+
+`IntentResolver.resolve()` 会取 `rewriteResult.subQuestions()`；如果没有子问题，就退回 `rewriteResult.rewrittenQuestion()`。然后每个子问题用 `CompletableFuture.supplyAsync()` 并行调用 `classifyIntents(q)`。
+
+对每个子问题，`DefaultIntentClassifier.classifyTargets(question)` 会让 LLM 在意图树叶子节点里选择候选并输出分数。假设当前意图树里有这些叶子节点：
+
+| id | type | path | collectionName |
+|----|------|------|----------------|
+| `biz-12306-order` | KB | 业务系统 / 12306系统 / 订单流程 | `kb_12306_order` |
+| `biz-12306-payment` | KB | 业务系统 / 12306系统 / 支付处理 | `kb_12306_payment` |
+
+那么三条子问题可能得到这样的候选：
+
+```text
+子问题1：12306系统的订单流程是什么
+LLM 返回：biz-12306-order, score=0.91
+IntentResolver 保留：0.91 >= 0.35
+
+子问题2：12306系统的支付环节怎么处理
+LLM 返回：biz-12306-payment, score=0.58
+IntentResolver 保留：0.58 >= 0.35
+
+子问题3：推荐一部周末看的电影
+LLM 返回：[]
+IntentResolver 保留：空意图
+```
+
+此时变量从 `RewriteResult` 变成 `List<SubQuestionIntent>`：
+
+```text
+subIntents = [
+  SubQuestionIntent(
+    subQuestion="12306系统的订单流程是什么",
+    nodeScores=[NodeScore(node=biz-12306-order, score=0.91)]
+  ),
+  SubQuestionIntent(
+    subQuestion="12306系统的支付环节怎么处理",
+    nodeScores=[NodeScore(node=biz-12306-payment, score=0.58)]
+  ),
+  SubQuestionIntent(
+    subQuestion="推荐一部周末看的电影",
+    nodeScores=[]
+  )
+]
+```
+
+#### 第四步：按分数选择检索路径
+
+`StreamChatPipeline.retrieve(ctx)` 调用：
+
+```java
+retrievalEngine.retrieve(ctx.getSubIntents(), searchProperties.getDefaultTopK());
+```
+
+`RetrievalEngine.retrieve()` 对每个 `SubQuestionIntent` 并行构建上下文。每个子问题都会进入：
+
+```java
+multiChannelRetrievalEngine.retrieveKnowledgeChannels(List.of(intent), topK);
+```
+
+也就是说，**通道选择是按子问题独立判断的**。
+
+对子问题 1：
+
+```text
+nodeScores = [biz-12306-order: 0.91]
+```
+
+- `IntentDirectedSearchChannel.isEnabled()`：有 KB 意图，且 `0.91 >= 0.4`，启用
+- `VectorGlobalSearchChannel.isEnabled()`：最高分 `0.91 >= 0.8`，不启用
+- 结果：只搜 `biz-12306-order.collectionName = kb_12306_order`
+
+对子问题 2：
+
+```text
+nodeScores = [biz-12306-payment: 0.58]
+```
+
+- `IntentDirectedSearchChannel.isEnabled()`：有 KB 意图，且 `0.58 >= 0.4`，启用
+- `VectorGlobalSearchChannel.isEnabled()`：最高分 `0.58 < 0.6`，启用全局兜底
+- 结果：同时搜 `kb_12306_payment` 和所有 KB collection，后续去重 + rerank
+
+对子问题 3：
+
+```text
+nodeScores = []
+```
+
+- `IntentDirectedSearchChannel.isEnabled()`：没有 KB 意图，不启用
+- `VectorGlobalSearchChannel.isEnabled()`：没有任何意图，启用全局检索
+- 结果：搜索所有 KB collection；如果仍无结果，最终会进入“未检索到与问题相关的文档内容”的兜底回答
+
+这个例子对应的路径表：
+
+| 子问题 | 意图分数 | 意图定向检索 | 全局向量检索 | 原因 |
+|--------|----------|--------------|--------------|------|
+| 12306系统的订单流程是什么 | `0.91` | 启用 | 不启用 | 高置信 KB 意图，精准检索即可 |
+| 12306系统的支付环节怎么处理 | `0.58` | 启用 | 启用 | 中等置信，定向检索 + 全局兜底 |
+| 推荐一部周末看的电影 | 无意图 | 不启用 | 启用 | 无法定位 KB 意图，只能全局兜底 |
+
+这张表还可以补两个边界分支：
+
+| 意图识别结果 | 意图定向检索 | 全局向量检索 | 说明 |
+|--------------|--------------|--------------|------|
+| 只有 1 个 KB 意图，分数 `0.72` | 启用 | 启用 | 已超过 `0.6`，但单一意图还没到 `0.8`，全局检索继续补召回 |
+| 有 2 个 KB 意图，最高分 `0.72` | 启用 | 不启用 | 多个候选能互相覆盖，最高分已超过 `0.6`，不再打开全局兜底 |
+
+最终，所有启用通道返回的 chunk 会进入后置处理链：
+
+```text
+SearchChannelResult 列表
+  -> DeduplicationPostProcessor 去重
+  -> RerankPostProcessor 重排
+  -> ContextFormatter.formatKbContext()
+  -> LLM 生成最终回答
+```
+
+面试里可以把这个流程压缩成一句话：
+
+> 请求进入后先做术语归一化和 LLM 改写拆分，得到 `RewriteResult`；每个子问题再通过 LLM 意图分类器对意图树叶子节点打分，形成 `SubQuestionIntent`；检索阶段不重新打分，而是根据这些分数决定启用意图定向通道、全局向量通道，或两个通道同时启用。
 
 ---
 
@@ -232,6 +510,7 @@ return new ArrayList<>(chunkMap.values());
 3. **RerankPostProcessor（order=10）再重排**
    - 把去重后的所有候选交给百炼重排模型
    - 由 Rerank API 重新打分并截取最终 top-K
+   - 如果 `rag.rerank.enabled=false`，该处理器会被跳过，最终结果就是去重后的候选顺序
 
 也就是说，**最终 top-K 不是两个通道原始分数直接排序出来的，而是"双通道召回 → 去重 → 重排"之后的结果。**
 
@@ -265,15 +544,15 @@ return new ArrayList<>(chunkMap.values());
 
 ### Q4：项目里实际的线程池参数是怎么配的？为什么这么配？
 
-**正确答案：** 当前项目已经把线程池扩展成多业务域隔离，不再只有 RAG 检索链路的 3 个池。检索链路相关的 3 个池仍然保留，但 `ragContextExecutor` 已经从早期固定 `2/4` 改成按 CPU 动态计算。
+**正确答案：** 当前项目已经把线程池扩展成多业务域隔离，不再只有 RAG 检索链路的 3 个池。检索链路相关的 3 个池仍然保留，其中 `ragContextExecutor` 和 `ragRetrievalExecutor` 已经按最近提交调整为 `4*CPU/4*CPU`，内层检索池是 `2*CPU/4*CPU`。
 
 `ThreadPoolExecutorConfig.java` 中的真实配置：
 
 | 线程池 | core | max | 队列 | 拒绝策略 |
 |--------|------|-----|------|---------|
 | `mcpBatchExecutor` | `CPU_COUNT` | `2*CPU_COUNT` | `SynchronousQueue` | `CallerRunsPolicy` |
-| `ragContextExecutor` | `CPU_COUNT` | `2*CPU_COUNT` | `SynchronousQueue` | `CallerRunsPolicy` |
-| `ragRetrievalExecutor` | `CPU_COUNT` | `2*CPU_COUNT` | `SynchronousQueue` | `CallerRunsPolicy` |
+| `ragContextExecutor` | `4*CPU_COUNT` | `4*CPU_COUNT` | `SynchronousQueue` | `CallerRunsPolicy` |
+| `ragRetrievalExecutor` | `4*CPU_COUNT` | `4*CPU_COUNT` | `SynchronousQueue` | `CallerRunsPolicy` |
 | `innerRetrievalExecutor` | `2*CPU_COUNT` | `4*CPU_COUNT` | `LinkedBlockingQueue(100)` | `CallerRunsPolicy` |
 | `intentClassifyExecutor` | `CPU_COUNT` | `2*CPU_COUNT` | `SynchronousQueue` | `CallerRunsPolicy` |
 | `memorySummaryExecutor` | `1` | `max(2, CPU_COUNT/2)` | `LinkedBlockingQueue(200)` | `CallerRunsPolicy` |
@@ -490,7 +769,7 @@ rag:
 | 分数 0.5 时 top-K 怎么来？ | 双通道并行召回 → `Deduplication(order=1)` 去重 → `Rerank(order=10)` 重排 |
 | CompletableFuture 怎么用的？ | 三层并行：子问题级、通道级、集合/意图级 |
 | 为什么拆三个线程池？ | 资源隔离，避免外层 `join()` 等待内层任务时线程饥饿/死锁 |
-| 实际线程池怎么配？ | 当前有 10 个业务线程池；RAG 检索核心三层是 context: CPU/2CPU、retrieval: CPU/2CPU、inner: 2CPU/4CPU |
+| 实际线程池怎么配？ | 当前有 10 个业务线程池；RAG 检索核心三层是 context: 4CPU/4CPU、retrieval: 4CPU/4CPU、inner: 2CPU/4CPU |
 | `allOf` 和逐个 `join` 的区别？ | `allOf` 适合全成功场景；逐个 `join` 更适合部分失败也要保留成功结果 |
 | 一个通道失败了怎么办？ | 返回空 `SearchChannelResult`，打日志，不中断其他通道 |
 | 去重怎么做？ | `LinkedHashMap` + `chunkId/hashCode`，按通道优先级遍历，重复时保留更高检索分 |

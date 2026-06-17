@@ -24,8 +24,11 @@ import com.nageoffer.ai.ragent.knowledge.mq.event.KnowledgeDocumentChunkEvent;
 import com.nageoffer.ai.ragent.knowledge.service.KnowledgeDocumentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
+import org.apache.rocketmq.spring.core.RocketMQPushConsumerLifecycleListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -39,9 +42,18 @@ import org.springframework.stereotype.Component;
         topic = "knowledge-document-chunk_topic${unique-name:}",
         consumerGroup = "knowledge-document-chunk_cg${unique-name:}"
 )
-public class KnowledgeDocumentChunkConsumer implements RocketMQListener<MessageWrapper<KnowledgeDocumentChunkEvent>> {
+public class KnowledgeDocumentChunkConsumer implements RocketMQListener<MessageWrapper<KnowledgeDocumentChunkEvent>>,
+        RocketMQPushConsumerLifecycleListener {
 
     private final KnowledgeDocumentService documentService;
+
+    @Value("${rocketmq.client-api-timeout:10000}")
+    private int rocketMqClientApiTimeout;
+
+    @Override
+    public void prepareStart(DefaultMQPushConsumer consumer) {
+        consumer.setMqClientApiTimeout(rocketMqClientApiTimeout);
+    }
 
     @Override
     public void onMessage(MessageWrapper<KnowledgeDocumentChunkEvent> message) {

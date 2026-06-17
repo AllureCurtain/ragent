@@ -22,8 +22,11 @@ import com.nageoffer.ai.ragent.rag.mq.event.MessageFeedbackEvent;
 import com.nageoffer.ai.ragent.rag.service.MessageFeedbackService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
 import org.apache.rocketmq.spring.annotation.RocketMQMessageListener;
+import org.apache.rocketmq.spring.core.RocketMQPushConsumerLifecycleListener;
 import org.apache.rocketmq.spring.core.RocketMQListener;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -36,9 +39,18 @@ import org.springframework.stereotype.Component;
         topic = "message-feedback_topic${unique-name:}",
         consumerGroup = "message-feedback_cg${unique-name:}"
 )
-public class MessageFeedbackConsumer implements RocketMQListener<MessageWrapper<MessageFeedbackEvent>> {
+public class MessageFeedbackConsumer implements RocketMQListener<MessageWrapper<MessageFeedbackEvent>>,
+        RocketMQPushConsumerLifecycleListener {
 
     private final MessageFeedbackService feedbackService;
+
+    @Value("${rocketmq.client-api-timeout:10000}")
+    private int rocketMqClientApiTimeout;
+
+    @Override
+    public void prepareStart(DefaultMQPushConsumer consumer) {
+        consumer.setMqClientApiTimeout(rocketMqClientApiTimeout);
+    }
 
     @Override
     public void onMessage(MessageWrapper<MessageFeedbackEvent> message) {
