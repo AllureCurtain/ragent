@@ -34,12 +34,15 @@ import com.nageoffer.ai.ragent.knowledge.dao.mapper.KnowledgeDocumentMapper;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
+import com.nageoffer.ai.ragent.framework.mq.producer.MessageQueueProducer;
+import com.nageoffer.ai.ragent.knowledge.mq.event.KnowledgeBaseCleanupEvent;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorSpaceId;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorSpaceSpec;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorStoreAdmin;
 import com.nageoffer.ai.ragent.knowledge.service.KnowledgeBaseService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -62,6 +65,10 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final KnowledgeDocumentMapper knowledgeDocumentMapper;
     private final VectorStoreAdmin vectorStoreAdmin;
     private final S3Client s3Client;
+    private final MessageQueueProducer messageQueueProducer;
+
+    @Value("knowledge-base-cleanup_topic${unique-name:}")
+    private String cleanupTopic;
 
     @Transactional
     @Override
@@ -75,6 +82,16 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         );
         if (count > 0) {
             throw new ServiceException("知识库名称已存在：" + requestParam.getName());
+        }
+
+        // Collection 名重复校验（共享 collection 模型下，向量层不再拦截重复，需在此显式校验）
+        Long collectionCount = knowledgeBaseMapper.selectCount(
+                new LambdaQueryWrapper<KnowledgeBaseDO>()
+                        .eq(KnowledgeBaseDO::getCollectionName, requestParam.getCollectionName())
+                        .eq(KnowledgeBaseDO::getDeleted, 0)
+        );
+        if (collectionCount > 0) {
+            throw new ServiceException("Collection 名称已存在：" + requestParam.getCollectionName());
         }
 
         KnowledgeBaseDO kbDO = KnowledgeBaseDO.builder()
@@ -174,7 +191,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public void delete(String kbId) {
         KnowledgeBaseDO kbDO = knowledgeBaseMapper.selectById(kbId);
         if (kbDO == null || kbDO.getDeleted() != null && kbDO.getDeleted() == 1) {
@@ -190,9 +206,27 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
             throw new ClientException("当前知识库下还有文档，请删除文档");
         }
 
-        kbDO.setDeleted(1);
-        kbDO.setUpdatedBy(UserContext.getUsername());
-        knowledgeBaseMapper.deleteById(kbDO);
+        String operator = UserContext.getUsername();
+        KnowledgeBaseCleanupEvent event = KnowledgeBaseCleanupEvent.builder()
+                .kbId(kbId)
+                .collectionName(kbDO.getCollectionName())
+                .operator(operator)
+                .build();
+
+        // 事务消息：本地事务软删知识库，提交后由消费者异步回收底层物理资源（Milvus collection / bucket / 残留向量）
+        messageQueueProducer.sendInTransaction(
+                cleanupTopic,
+                kbId,
+                "知识库删除清理",
+                event,
+                arg -> {
+                    kbDO.setUpdatedBy(operator);
+                    int rows = knowledgeBaseMapper.deleteById(kbDO);
+                    if (rows == 0) {
+                        throw new ClientException("知识库不存在或已删除");
+                    }
+                }
+        );
     }
 
     @Override
