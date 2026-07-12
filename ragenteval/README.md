@@ -65,7 +65,7 @@ python -m eval rag diff run_a run_b -o reports/diff.md   # 同时落 markdown
 ## 项目结构
 
 ```
-bitselect-rag-assistant/
+ragenteval/
 ├── README.md                    你正在读的文件
 ├── CLAUDE.md                    协作指南（进度、架构决策、规范）
 │
@@ -97,7 +97,8 @@ bitselect-rag-assistant/
 │   │       ├── create_kbs.py    建 4 个知识库
 │   │       ├── upload_docs.py    灌 115 篇文档（断点续传）
 │   │       ├── build_intent_tree.py  灌意图树
-│   │       └── reset_kbs.py      清空（默认 dry-run）
+│   │       ├── reset_kbs.py      清空 KB/文档（默认 dry-run）
+│   │       └── reset_intent_tree.py  清空意图树（默认 dry-run）
 │   ├── agent/                   Agent 评测（预留）
 │   │   ├── dataset/
 │   │   ├── pipeline/

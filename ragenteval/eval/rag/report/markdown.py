@@ -37,10 +37,8 @@ BASELINE_ORDER = [
     ("fallback_when_required", "答案兜底率"),
     ("over_retrieval_rate", "过召回率（!requires_rag 却走 RAG）"),
     ("ttft_p50_ms", "首字延迟 P50 (ms)"),
-    ("ttft_p95_ms", "首字延迟 P95 (ms)"),
-    ("ttft_p99_ms", "首字延迟 P99 (ms)"),
     ("ttft_mean_ms", "首字延迟均值 (ms)"),
-    ("total_p95_ms", "整流 P95 (ms)"),
+    ("total_mean_ms", "整流均值 (ms)"),
 ]
 RAGAS_ORDER = [
     ("faithfulness", "Faithfulness"),
@@ -271,7 +269,7 @@ def render_per_sample_csv(
     header = ["query_id", "intent_l1", "intent_l2", "difficulty", "requires_rag", "final_status"]
     for name in metric_names:
         header.append(name)
-        if name in RAGAS_KEYS and manual_overrides.get(name):
+        if name in RAGAS_KEYS:
             header.append(_manual_col(name))
 
     rows: list[list[str]] = [header]
@@ -287,7 +285,7 @@ def render_per_sample_csv(
         for name in metric_names:
             v = idx[name].per_sample.get(r.query_id)
             row.append(_fmt_csv_value(v) if isinstance(v, float) or v is None else str(v))
-            if name in RAGAS_KEYS and manual_overrides.get(name):
+            if name in RAGAS_KEYS:
                 row.append(_fmt_csv_value(manual_overrides.get(name, {}).get(r.query_id)))
         rows.append(row)
     return rows
