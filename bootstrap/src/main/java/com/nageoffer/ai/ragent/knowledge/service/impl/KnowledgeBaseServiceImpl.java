@@ -23,6 +23,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.mzt.logapi.starter.annotation.LogRecord;
+import com.nageoffer.ai.ragent.audit.constant.BizChangeBizType;
+import com.nageoffer.ai.ragent.audit.constant.BizChangeOperationType;
+import com.nageoffer.ai.ragent.audit.support.BizChangeLogContext;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeBaseCreateRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeBasePageRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeBaseUpdateRequest;
@@ -66,12 +70,22 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final VectorStoreAdmin vectorStoreAdmin;
     private final S3Client s3Client;
     private final MessageQueueProducer messageQueueProducer;
+    private final BizChangeLogContext bizChangeLogContext;
 
     @Value("knowledge-base-cleanup_topic${unique-name:}")
     private String cleanupTopic;
 
     @Transactional
     @Override
+    @LogRecord(
+            success = "创建知识库：{{#requestParam.name}}",
+            fail = "创建知识库失败：{{#_errorMsg}}",
+            type = BizChangeBizType.KNOWLEDGE_BASE,
+            subType = BizChangeOperationType.CREATE,
+            bizNo = BizChangeLogContext.BIZ_ID_EXPRESSION,
+            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
+            condition = BizChangeLogContext.RECORD_CONDITION
+    )
     public String create(KnowledgeBaseCreateRequest requestParam) {
         // 名称重复校验
         String name = requestParam.getName().replaceAll("\\s+", "");
@@ -126,15 +140,26 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 .build();
         vectorStoreAdmin.ensureVectorSpace(spaceSpec);
 
+        bizChangeLogContext.put(String.valueOf(kbDO.getId()), null, kbDO);
         return String.valueOf(kbDO.getId());
     }
 
     @Override
+    @LogRecord(
+            success = "更新知识库：{{#requestParam.id}}",
+            fail = "更新知识库失败：{{#_errorMsg}}",
+            type = BizChangeBizType.KNOWLEDGE_BASE,
+            subType = BizChangeOperationType.UPDATE,
+            bizNo = "{{#requestParam.id}}",
+            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
+            condition = BizChangeLogContext.RECORD_CONDITION
+    )
     public void update(KnowledgeBaseUpdateRequest requestParam) {
         KnowledgeBaseDO kb = knowledgeBaseMapper.selectById(requestParam.getId());
         if (kb == null || kb.getDeleted() != null && kb.getDeleted() == 1) {
             throw new ClientException("知识库不存在：" + requestParam.getId());
         }
+        KnowledgeBaseDO before = BeanUtil.copyProperties(kb, KnowledgeBaseDO.class);
 
         if (StringUtils.hasText(requestParam.getEmbeddingModel())
                 && !requestParam.getEmbeddingModel().equals(kb.getEmbeddingModel())) {
@@ -158,14 +183,25 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
         kb.setUpdatedBy(UserContext.getUsername());
         knowledgeBaseMapper.updateById(kb);
+        bizChangeLogContext.put(requestParam.getId(), before, knowledgeBaseMapper.selectById(requestParam.getId()));
     }
 
     @Override
+    @LogRecord(
+            success = "重命名知识库：{{#kbId}}",
+            fail = "重命名知识库失败：{{#_errorMsg}}",
+            type = BizChangeBizType.KNOWLEDGE_BASE,
+            subType = BizChangeOperationType.UPDATE,
+            bizNo = "{{#kbId}}",
+            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
+            condition = BizChangeLogContext.RECORD_CONDITION
+    )
     public void rename(String kbId, KnowledgeBaseUpdateRequest requestParam) {
         KnowledgeBaseDO kb = knowledgeBaseMapper.selectById(kbId);
         if (kb == null || kb.getDeleted() != null && kb.getDeleted() == 1) {
             throw new ClientException("知识库不存在");
         }
+        KnowledgeBaseDO before = BeanUtil.copyProperties(kb, KnowledgeBaseDO.class);
 
         if (!StringUtils.hasText(requestParam.getName())) {
             throw new ClientException("知识库名称不能为空");
@@ -186,16 +222,27 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         kb.setName(requestParam.getName());
         kb.setUpdatedBy(UserContext.getUsername());
         knowledgeBaseMapper.updateById(kb);
+        bizChangeLogContext.put(kbId, before, knowledgeBaseMapper.selectById(kbId));
 
         log.info("成功重命名知识库, kbId={}, newName={}", kbId, requestParam.getName());
     }
 
     @Override
+    @LogRecord(
+            success = "删除知识库：{{#kbId}}",
+            fail = "删除知识库失败：{{#_errorMsg}}",
+            type = BizChangeBizType.KNOWLEDGE_BASE,
+            subType = BizChangeOperationType.DELETE,
+            bizNo = "{{#kbId}}",
+            extra = BizChangeLogContext.SNAPSHOT_EXPRESSION,
+            condition = BizChangeLogContext.RECORD_CONDITION
+    )
     public void delete(String kbId) {
         KnowledgeBaseDO kbDO = knowledgeBaseMapper.selectById(kbId);
         if (kbDO == null || kbDO.getDeleted() != null && kbDO.getDeleted() == 1) {
             throw new ClientException("知识库不存在");
         }
+        KnowledgeBaseDO before = BeanUtil.copyProperties(kbDO, KnowledgeBaseDO.class);
 
         Long docCount = knowledgeDocumentMapper.selectCount(
                 Wrappers.lambdaQuery(KnowledgeDocumentDO.class)
@@ -227,6 +274,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                     }
                 }
         );
+        bizChangeLogContext.put(kbId, before, null);
     }
 
     @Override
