@@ -57,7 +57,6 @@ import org.commonmark.node.SoftLineBreak;
 import org.commonmark.node.StrongEmphasis;
 import org.commonmark.node.Text;
 import org.commonmark.parser.Parser;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
@@ -98,12 +97,9 @@ public class MinerUResultUnpacker {
             .build();
 
     private final FileStorageService fileStorageService;
-    private final String assetBucket;
 
-    public MinerUResultUnpacker(FileStorageService fileStorageService,
-                                @Value("${rustfs.asset-bucket:ragent-assets}") String assetBucket) {
+    public MinerUResultUnpacker(FileStorageService fileStorageService) {
         this.fileStorageService = fileStorageService;
-        this.assetBucket = assetBucket;
     }
 
     /**
@@ -199,8 +195,8 @@ public class MinerUResultUnpacker {
             String filename = "assets/" + documentId + "/" + UUID.randomUUID() + "." + ext;
             String mime = inferMime(ext);
             try {
-                StoredFileDTO stored = fileStorageService.upload(assetBucket, data, filename, mime);
-                // 转为浏览器可直连的公开 URL(asset-bucket 已开公共读)，供 markdown 图片链接固化入库
+                StoredFileDTO stored = fileStorageService.uploadAsset(data, filename, mime);
+                // 转为浏览器可直连的公开 URL(资产桶已开公共读)，供 markdown 图片链接固化入库
                 String publicUrl = fileStorageService.getPublicUrl(stored.getUrl());
                 result.put(zipPath, publicUrl);
             } catch (Exception ex) {

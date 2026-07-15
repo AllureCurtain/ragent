@@ -25,7 +25,7 @@ import lombok.RequiredArgsConstructor;
 /**
  * 文档源类型枚举
  * 定义支持的文档来源类型，用于标识文档的获取方式
- * 类型值使用小写 snake_case，如 file、url、feishu、s3
+ * 类型值使用小写 snake_case，如 file、url、feishu
  */
 @Getter
 @RequiredArgsConstructor
@@ -44,12 +44,7 @@ public enum SourceType {
     /**
      * 飞书文档 - 文档来源为飞书文档
      */
-    FEISHU("feishu"),
-
-    /**
-     * S3对象存储 - 文档来源为S3兼容的对象存储（如RustFS）
-     */
-    S3("s3");
+    FEISHU("feishu");
 
     /**
      * 类型值（小写 snake_case）

@@ -43,6 +43,24 @@ milvus:
   uri: http://localhost:19530
 
 rag:
+  storage:
+    type: s3  # 可选 s3（rustfs / minio）/ oss（阿里云）
+    kb-bucket: ragent-sources        # 全局知识库桶（私有），所有知识库文档按 collectionName 目录隔离；OSS 桶名全局唯一，生产需按部署覆盖
+    asset-bucket: ragent-assets # 多模态资产桶（公共读），PDF 抽出的图片等供浏览器匿名直连预览
+    s3:
+      endpoint: http://100.67.140.111:9000
+      access-key: rustfsadmin
+      secret-key: rustfsadmin
+      region: us-east-1
+      path-style: true
+      public-url:  # 内外网端点不同时配置，留空回退 endpoint
+    oss:
+      endpoint: https://oss-cn-hangzhou.aliyuncs.com
+      access-key: ${OSS_ACCESS_KEY:}
+      secret-key: ${OSS_SECRET_KEY:}
+      region: cn-hangzhou
+      public-url:  # 虚拟主机式基址（含 bucket 子域），如 https://ragent-assets.oss-cn-hangzhou.aliyuncs.com；留空由 endpoint 推导
+
   vector:
     type: pg  # 可选 milvus / pg
 
@@ -232,15 +250,6 @@ ai:
       - id: qwen-vl-max
         provider: bailian
         model: qwen-vl-max
-
-rustfs:
-  url: http://100.67.140.111:9000
-  # console: http://100.67.140.111:9001
-  access-key-id: rustfsadmin
-  secret-access-key: rustfsadmin
-  # 多模态解析产物 bucket（PDF 抽出来的图片、未来 PNG 原图等）
-  # 与用户上传的原始文档 bucket 隔离
-  asset-bucket: ragent-assets
 
 # MinerU SaaS API 配置（PDF / Word / PPT 走 MinerU 解析）
 mineru:

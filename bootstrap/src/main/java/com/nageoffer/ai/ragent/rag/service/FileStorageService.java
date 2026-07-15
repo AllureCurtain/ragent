@@ -22,86 +22,95 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
 
+/**
+ * 文件存储服务：后端无关的高层门面
+ * <p>
+ * 所有知识库文档共用一个全局桶，按 {@code namespace}（= 知识库 collectionName）划分目录（key 前缀）；
+ * 多模态资产落公共读资产桶。底层通过 {@link com.nageoffer.ai.ragent.rag.core.storage.ObjectStorageClient}
+ * 在 S3 兼容存储与阿里云 OSS 间切换，业务代码只依赖本接口
+ * <p>
+ * 存储引用（{@link StoredFileDTO#getUrl()} / 文档 file_url）只保留裸 key（如 {@code {namespace}/{uuid}.ext}）：
+ * 桶是部署级配置常量、不写进数据，读写时按操作语义回退到对应桶（文档→知识库桶，资产→资产桶）
+ */
 public interface FileStorageService {
 
     /**
-     * 上传文件（流式，低内存）
+     * 上传知识库文档（流式，低内存）
      * <p>
-     * 通过 S3Presigner 预签名 URL + HttpURLConnection 流式上传，堆内存开销近似为零
-     * 适用于大文件上传、高并发场景。不具备 SDK 内置的自动重试能力，失败需业务层自行重试
-     */
-    StoredFileDTO upload(String bucketName, MultipartFile file);
-
-    /**
-     * 上传文件（流式，低内存）
-     * <p>
-     * 通过 S3Presigner 预签名 URL + HttpURLConnection 流式上传，堆内存开销近似为零
-     * 适用于大文件上传、高并发场景。不具备 SDK 内置的自动重试能力，失败需业务层自行重试
-     */
-    StoredFileDTO upload(String bucketName, InputStream content, long size, String originalFilename, String contentType);
-
-    /**
-     * 上传文件（流式，低内存）
-     * <p>
-     * 通过 S3Presigner 预签名 URL + HttpURLConnection 流式上传，堆内存开销近似为零
-     * 适用于大文件上传、高并发场景。不具备 SDK 内置的自动重试能力，失败需业务层自行重试
-     */
-    StoredFileDTO upload(String bucketName, byte[] content, String originalFilename, String contentType);
-
-    /**
-     * 上传文件（SDK 原生，带自动重试）
-     * <p>
-     * 通过 AWS SDK 的 putObject 上传，具备 SDK 内置的自动重试机制（网络抖动、超时等场景自动重发）
-     * 代价是 SDK 上传管线会将 payload 缓冲到堆内存（实测 30MB 文件约 100MB 堆增量）
-     * 适用于小文件上传或对重试可靠性要求高、但对内存不敏感的场景。
-     */
-    StoredFileDTO reliableUpload(String bucketName, InputStream content, long size, String originalFilename, String contentType);
-
-    InputStream openStream(String url);
-
-    void deleteByUrl(String url);
-
-    /**
-     * 判断 bucket 是否存在
+     * 写入全局知识库桶，对象 key = {@code {namespace}/{uuid}.{ext}}
+     * 不具备 SDK 内置自动重试能力，失败需业务层自行重试
      *
-     * @param bucket bucket 名
-     * @return 存在返回 true,不存在返回 false
+     * @param namespace 知识库命名空间（collectionName）
      */
-    boolean bucketExists(String bucket);
+    StoredFileDTO upload(String namespace, MultipartFile file);
 
     /**
-     * 创建 bucket(幂等:已存在视为成功)
+     * 上传知识库文档（流式，低内存）
      *
-     * @param bucket bucket 名
+     * @param namespace 知识库命名空间（collectionName）
      */
-    void createBucket(String bucket);
+    StoredFileDTO upload(String namespace, InputStream content, long size, String originalFilename, String contentType);
 
     /**
-     * 删除 bucket(幂等:不存在视为成功)
+     * 上传知识库文档（流式，低内存）
+     *
+     * @param namespace 知识库命名空间（collectionName）
+     */
+    StoredFileDTO upload(String namespace, byte[] content, String originalFilename, String contentType);
+
+    /**
+     * 上传知识库文档（SDK 原生，带自动重试）
      * <p>
-     * 先清空桶内对象再删桶,用于知识库删除时回收其独占 bucket
+     * 具备自动重试机制，代价是可能将 payload 缓冲到堆内存；适用于小文件或对可靠性敏感的场景
      *
-     * @param bucket bucket 名
+     * @param namespace 知识库命名空间（collectionName）
      */
-    void deleteBucket(String bucket);
+    StoredFileDTO reliableUpload(String namespace, InputStream content, long size, String originalFilename, String contentType);
 
     /**
-     * 把内部存储定位符转为浏览器可直连的公开预览 URL
+     * 上传多模态资产（公共读）
      * <p>
-     * 形如 {@code s3://ragent-assets/xxx.jpg} → {@code http://{rustfs}/ragent-assets/xxx.jpg}
-     * 要求对应 bucket 已开启公共读(见 {@link #setBucketPublicReadOnly}),仅用于多模态资产等可公开预览的对象
+     * 写入资产桶，供 {@link #getPublicUrl} 转成浏览器可匿名直连的预览 URL
+     */
+    StoredFileDTO uploadAsset(byte[] content, String originalFilename, String contentType);
+
+    /**
+     * 打开我方文档的输入流（落知识库桶）
      *
-     * @param url 内部 {@code s3://bucket/key} 定位符
+     * @param key 对象裸 key（如 {@code {namespace}/{uuid}.ext}）
+     */
+    InputStream openStream(String key);
+
+    /**
+     * 删除我方文档（落知识库桶）
+     *
+     * @param key 对象裸 key
+     */
+    void deleteByUrl(String key);
+
+    /**
+     * 把我方资产裸 key 转为浏览器可匿名直连的公开预览 URL（落资产桶）
+     * <p>
+     * 要求资产桶已开公共读，仅用于多模态资产等可公开预览的对象
+     *
+     * @param key 资产对象裸 key
      * @return 公开 HTTP URL
      */
-    String getPublicUrl(String url);
+    String getPublicUrl(String key);
 
     /**
-     * 给 bucket 下发公共读(匿名 GetObject)策略,幂等
-     * <p>
-     * 用于多模态解析产物 bucket:PDF 抽出的图片需被浏览器匿名直连预览
+     * 创建知识库空间（幂等）：在全局知识库桶下建立目录（写 {@code {namespace}/} 标记对象）
      *
-     * @param bucket bucket 名
+     * @param namespace 知识库命名空间（collectionName）
      */
-    void setBucketPublicReadOnly(String bucket);
+    void createKnowledgeSpace(String namespace);
+
+    /**
+     * 删除知识库空间（幂等）：清空全局知识库桶下 {@code {namespace}/} 前缀的所有对象
+     * <p>
+     * 只删该知识库目录，绝不删桶
+     *
+     * @param namespace 知识库命名空间（collectionName）
+     */
+    void deleteKnowledgeSpace(String namespace);
 }

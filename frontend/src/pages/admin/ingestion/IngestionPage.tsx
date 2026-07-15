@@ -61,8 +61,7 @@ const STATUS_OPTIONS = [
 const SOURCE_OPTIONS = [
   { value: "file", label: "Local File" },
   { value: "url", label: "Remote URL" },
-  { value: "feishu", label: "Feishu" },
-  { value: "s3", label: "S3" }
+  { value: "feishu", label: "Feishu" }
 ];
 
 const NODE_TYPE_OPTIONS = [
@@ -1865,12 +1864,6 @@ function TaskDialog({ open, pipelineOptions, onOpenChange, onSubmit, onUpload }:
           locationHint: "填写飞书文档链接",
           credentialsHint: '{"tenantAccessToken":"..."} 或 {"app_id":"...","app_secret":"..."}'
         };
-      case "s3":
-        return {
-          locationPlaceholder: "s3://bucket/key",
-          locationHint: "填写 S3 路径，例如 s3://biz/file.md",
-          credentialsHint: ""
-        };
       case "url":
       default:
         return {
@@ -1981,7 +1974,7 @@ function TaskDialog({ open, pipelineOptions, onOpenChange, onSubmit, onUpload }:
       <DialogContent className="max-h-[90vh] overflow-y-auto sidebar-scroll sm:max-w-[720px]">
         <DialogHeader>
           <DialogTitle>新建通道任务</DialogTitle>
-          <DialogDescription>支持 Local File / URL / Feishu / S3 来源，Local File 会直接上传文件</DialogDescription>
+          <DialogDescription>支持 Local File / URL / Feishu 来源，Local File 会直接上传文件</DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form className="space-y-4" onSubmit={form.handleSubmit(handleSubmit)}>

@@ -31,7 +31,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.batik.transcoder.TranscoderInput;
 import org.apache.batik.transcoder.TranscoderOutput;
 import org.apache.batik.transcoder.image.PNGTranscoder;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -71,16 +70,13 @@ public class ImageDocumentParser implements DocumentParser {
     private final VlmService vlmService;
     private final FileStorageService fileStorageService;
     private final ImageParseProperties properties;
-    private final String assetBucket;
 
     public ImageDocumentParser(VlmService vlmService,
                                FileStorageService fileStorageService,
-                               ImageParseProperties properties,
-                               @Value("${rustfs.asset-bucket:ragent-assets}") String assetBucket) {
+                               ImageParseProperties properties) {
         this.vlmService = vlmService;
         this.fileStorageService = fileStorageService;
         this.properties = properties;
-        this.assetBucket = assetBucket;
     }
 
     @Override
@@ -124,10 +120,10 @@ public class ImageDocumentParser implements DocumentParser {
             throw new ServiceException("VLM 返回空描述，无法生成可检索文本：file=" + sourceFile);
         }
 
-        // 2. 原图上传 asset-bucket（public-read），拿匿名可达的公网 URL
+        // 2. 原图上传资产桶（public-read），拿匿名可达的公网 URL
         String ext = extFromMime(mimeType);
         String filename = "assets/" + documentId + "/" + UUID.randomUUID() + "." + ext;
-        StoredFileDTO stored = fileStorageService.upload(assetBucket, content, filename, mimeType);
+        StoredFileDTO stored = fileStorageService.uploadAsset(content, filename, mimeType);
         String publicUrl = fileStorageService.getPublicUrl(stored.getUrl());
 
         // 3. 构造 ImageBlock：description 同时用于 content(展示/答题)与 embeddingText(向量，由 ImageChunker 去 URL)

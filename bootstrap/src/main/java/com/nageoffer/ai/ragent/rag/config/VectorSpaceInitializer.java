@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * 向量共享空间启动初始化器
  * <p>
- * 与 {@link AssetBucketInitializer} 对称：系统启动时幂等确保共享向量空间存在，免去首次建库/首次入库前的懒加载依赖
+ * 与 {@link StorageInitializer} 对称：系统启动时幂等确保共享向量空间存在，免去首次建库/首次入库前的懒加载依赖
  * 后端无关——Milvus 建共享 collection，PG 依赖迁移脚本建表故此处为空操作，均以 {@link VectorStoreAdmin} 抹平差异
  * 集群环境下用 Redisson 分布式锁保证只建一次：先判断是否存在 → 拿锁 → 双重检查 → 创建
  * <p>

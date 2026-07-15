@@ -43,6 +43,7 @@ import com.nageoffer.ai.ragent.knowledge.mq.event.KnowledgeBaseCleanupEvent;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorSpaceId;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorSpaceSpec;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorStoreAdmin;
+import com.nageoffer.ai.ragent.rag.service.FileStorageService;
 import com.nageoffer.ai.ragent.knowledge.service.KnowledgeBaseService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,9 +51,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
-import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.BucketAlreadyExistsException;
-import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException;
 
 import java.util.HashMap;
 import java.util.List;
@@ -68,7 +66,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final KnowledgeDocumentMapper knowledgeDocumentMapper;
     private final VectorStoreAdmin vectorStoreAdmin;
-    private final S3Client s3Client;
+    private final FileStorageService fileStorageService;
     private final MessageQueueProducer messageQueueProducer;
     private final BizChangeLogContext bizChangeLogContext;
 
@@ -119,18 +117,8 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
         knowledgeBaseMapper.insert(kbDO);
 
-        String bucketName = requestParam.getCollectionName();
-        try {
-            s3Client.createBucket(builder -> builder.bucket(bucketName));
-            log.info("成功创建RestFS存储桶，Bucket名称: {}", bucketName);
-        } catch (BucketAlreadyOwnedByYouException | BucketAlreadyExistsException e) {
-            if (e instanceof BucketAlreadyOwnedByYouException) {
-                log.error("RestFS存储桶已存在，Bucket名称: {}", bucketName, e);
-            } else {
-                log.error("RestFS存储桶已存在但由其他账户拥有，Bucket名称: {}", bucketName, e);
-            }
-            throw new ServiceException("存储桶名称已被占用：" + bucketName);
-        }
+        // 在全局知识库桶下建立该知识库目录（幂等），collectionName 即目录名
+        fileStorageService.createKnowledgeSpace(requestParam.getCollectionName());
 
         VectorSpaceSpec spaceSpec = VectorSpaceSpec.builder()
                 .spaceId(VectorSpaceId.builder()

@@ -37,7 +37,7 @@ public class DocumentSource {
 
     /**
      * 文档源类型
-     * 如 file、url、feishu、s3 等
+     * 如 file、url、feishu 等
      */
     private SourceType type;
 

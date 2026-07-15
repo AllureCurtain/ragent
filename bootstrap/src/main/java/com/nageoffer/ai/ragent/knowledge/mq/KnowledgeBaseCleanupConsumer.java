@@ -69,10 +69,10 @@ public class KnowledgeBaseCleanupConsumer implements RocketMQListener<MessageWra
         }
 
         try {
-            fileStorageService.deleteBucket(collectionName);
+            fileStorageService.deleteKnowledgeSpace(collectionName);
         } catch (Exception e) {
             allSucceeded = false;
-            log.error("删除 bucket 失败，bucket={}", collectionName, e);
+            log.error("删除知识库存储目录失败，namespace={}", collectionName, e);
         }
 
         KeywordIndexService keywordIndexService = keywordIndexServiceProvider.getIfAvailable();
