@@ -51,4 +51,22 @@ public class RetrievedChunk {
      * 数值越大表示与查询的相关性越高
      */
     private Float score;
+
+    /**
+     * 所属文档 ID
+     * 检索后由元数据富化补齐 未富化时为 null
+     */
+    private String docId;
+
+    /**
+     * 分块在所属文档中的序号 从 0 开始
+     * 检索后由元数据富化补齐 未富化时为 null
+     */
+    private Integer chunkIndex;
+
+    /**
+     * 所属文档名称 用于组装上下文时作为文档标题的内部锚点
+     * 检索后由元数据富化补齐 未富化时为 null
+     */
+    private String docName;
 }

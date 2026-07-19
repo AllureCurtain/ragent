@@ -96,7 +96,11 @@ public class EsKeywordRetrieverService implements KeywordRetrieverService {
         KeywordHitDocument source = hit.source();
         String content = source == null || source.getContent() == null ? "" : source.getContent();
         float score = hit.score() == null ? 0f : hit.score().floatValue();
-        return new RetrievedChunk(hit.id(), content, score);
+        return RetrievedChunk.builder()
+                .id(hit.id())
+                .text(content)
+                .score(score)
+                .build();
     }
 
     @Setter

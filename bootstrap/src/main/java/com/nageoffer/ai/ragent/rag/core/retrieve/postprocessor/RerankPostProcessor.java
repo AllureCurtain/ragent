@@ -21,12 +21,15 @@ import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.infra.rerank.RerankService;
 import com.nageoffer.ai.ragent.rag.config.RAGConfigProperties;
 import com.nageoffer.ai.ragent.rag.core.retrieve.channel.SearchChannelResult;
+import com.nageoffer.ai.ragent.rag.core.retrieve.channel.SearchChannelType;
 import com.nageoffer.ai.ragent.rag.core.retrieve.channel.SearchContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Rerank 后置处理器
@@ -66,10 +69,38 @@ public class RerankPostProcessor implements SearchResultPostProcessor {
             return chunks;
         }
 
-        return rerankService.rerank(
+        List<RetrievedChunk> reranked = rerankService.rerank(
                 context.getMainQuestion(),
                 chunks,
                 context.getTopK()
         );
+
+        logAttribution(chunks, reranked, results);
+        return reranked;
+    }
+
+    /**
+     * 归因日志：对比 Rerank 前后各通道的候选数，重点是「图谱证据存活率」
+     * <p>
+     * 若图谱大量进入 Rerank 却几乎不存活，说明其当前是纯成本（塞候选、占名额、被淘汰），
+     * 应下调图谱权重（{@code fusion.channel-weights.graph}）或先优化其长证据的可排性，再决定去留
+     */
+    private void logAttribution(List<RetrievedChunk> before,
+                                List<RetrievedChunk> after,
+                                List<SearchChannelResult> results) {
+        if (results == null || results.size() <= 1) {
+            return;
+        }
+        Map<String, Set<SearchChannelType>> index = ChannelAttribution.index(results);
+        log.info("检索归因 - Rerank 输入按通道: {}, 输出 top{} 按通道: {}",
+                ChannelAttribution.format(ChannelAttribution.countByChannel(before, index)),
+                after.size(),
+                ChannelAttribution.format(ChannelAttribution.countByChannel(after, index)));
+
+        long graphIn = ChannelAttribution.countOfChannel(before, index, SearchChannelType.GRAPH);
+        if (graphIn > 0) {
+            long graphOut = ChannelAttribution.countOfChannel(after, index, SearchChannelType.GRAPH);
+            log.info("检索归因 - 图谱证据存活: {}/{}", graphOut, graphIn);
+        }
     }
 }

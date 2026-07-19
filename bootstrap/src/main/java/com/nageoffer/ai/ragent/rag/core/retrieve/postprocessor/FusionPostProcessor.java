@@ -17,10 +17,10 @@
 
 package com.nageoffer.ai.ragent.rag.core.retrieve.postprocessor;
 
-import cn.hutool.crypto.digest.DigestUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.core.retrieve.channel.SearchChannelResult;
+import com.nageoffer.ai.ragent.rag.core.retrieve.channel.SearchChannelType;
 import com.nageoffer.ai.ragent.rag.core.retrieve.channel.SearchContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 融合后置处理器（RRF）
@@ -37,7 +38,10 @@ import java.util.Map;
  * 使用 Reciprocal Rank Fusion（倒数名次融合）合并多个检索通道的结果
  * 向量分（余弦）与关键词分（BM25）量纲不同、不可直接比较，RRF 只依据名次，天然跨模态可比
  * <p>
- * score(chunk) = Σ_channel 1 / (k + rank_channel)
+ * score(chunk) = Σ_channel weight_channel / (k + rank_channel)
+ * <p>
+ * weight_channel 为各通道贡献权重（{@code fusion.channel-weights}）：RRF 丢弃分数量纲后各通道本默认等权，
+ * 加权让可信度不同的通道话语权不同（如新接入、跑在全局图上的图谱通道降权），避免噪声通道靠名次抢前排
  * <p>
  * 名次取自不可变的 {@link SearchChannelResult} 列表（每个通道的原始召回顺序），
  * 因此即便上游去重处理器已合并 chunks，也不会丢失「多路命中」信息
@@ -97,10 +101,11 @@ public class FusionPostProcessor implements SearchResultPostProcessor {
 
         Map<String, Double> rrfScores = new LinkedHashMap<>();
         for (SearchChannelResult result : results) {
+            double weight = weightOf(result.getChannelType());
             List<RetrievedChunk> channelChunks = result.getChunks();
             for (int rank = 0; rank < channelChunks.size(); rank++) {
                 String key = chunkKey(channelChunks.get(rank));
-                double delta = 1.0 / (k + rank + 1);
+                double delta = weight / (k + rank + 1);
                 rrfScores.merge(key, delta, Double::sum);
             }
         }
@@ -129,17 +134,37 @@ public class FusionPostProcessor implements SearchResultPostProcessor {
         log.info("RRF 融合完成 - 通道数: {}, k: {}, 融合后: {} 个, 截断上限: {}, 送入 Rerank: {} 个",
                 channelCount, properties.getFusion().getRrfK(), ranked.size(),
                 limit > 0 ? String.valueOf(limit) : "不限", candidates.size());
+
+        // 归因日志：送入 Rerank 的候选按来源通道分布，便于观测各通道（尤其新接入的图谱）实际贡献了多少候选
+        if (channelCount > 1) {
+            Map<String, Set<SearchChannelType>> index = ChannelAttribution.index(results);
+            log.info("检索归因 - 送入 Rerank 候选按通道: {}",
+                    ChannelAttribution.format(ChannelAttribution.countByChannel(candidates, index)));
+        }
         return candidates;
     }
 
     /**
-     * 生成 Chunk 融合键，与去重处理器保持一致（优先 id，缺失时退化为文本哈希）
+     * 生成 Chunk 融合键 复用统一的归因键规则（优先 id，缺失时退化为文本 SHA-256），
+     * 保证融合累分与归因反查用的是同一套 key
      */
     private String chunkKey(RetrievedChunk chunk) {
-        // 与去重处理器一致改用 SHA-256：String.hashCode() 碰撞会让不同 Chunk 的
-        // RRF 分数被错误地累加到同一个键上
-        return chunk.getId() != null
-                ? chunk.getId()
-                : DigestUtil.sha256Hex(chunk.getText() == null ? "" : chunk.getText());
+        return ChannelAttribution.keyOf(chunk);
+    }
+
+    /**
+     * 通道 RRF 贡献权重：让不同可信度的通道在融合时话语权不同
+     * config 层不依赖 core 的通道枚举，故枚举到权重的映射放在此处
+     */
+    private double weightOf(SearchChannelType type) {
+        SearchChannelProperties.ChannelWeights w = properties.getFusion().getChannelWeights();
+        return switch (type) {
+            case INTENT_DIRECTED -> w.getIntentDirected();
+            case VECTOR_GLOBAL -> w.getVectorGlobal();
+            case KEYWORD -> w.getKeyword();
+            case GRAPH -> w.getGraph();
+            case WEB_SEARCH -> w.getWebSearch();
+            case HYBRID -> w.getDefaultWeight();
+        };
     }
 }

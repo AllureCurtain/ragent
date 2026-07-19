@@ -61,6 +61,16 @@ public class SearchChannelProperties {
          * 关键词检索配置
          */
         private Keyword keyword = new Keyword();
+
+        /**
+         * 联网检索配置（You.com Search）
+         */
+        private WebSearch webSearch = new WebSearch();
+
+        /**
+         * 知识图谱检索配置
+         */
+        private Graph graph = new Graph();
     }
 
     @Data
@@ -148,6 +158,61 @@ public class SearchChannelProperties {
     }
 
     @Data
+    public static class Graph {
+
+        /**
+         * 是否启用
+         * 仅当开启图谱后端（rag.graph.type != none）时才会真正生效
+         */
+        private boolean enabled = false;
+
+        /**
+         * 检索范围
+         * intent 仅意图域 / global 全局图 / both 意图优先，无意图时全局兜底
+         */
+        private String mode = "both";
+
+        /**
+         * TopK 倍数
+         * 图谱召回实体/关系与来源分块，候选交由融合与 Rerank 精排
+         */
+        private int topKMultiplier = 2;
+    }
+
+    @Data
+    public static class WebSearch {
+
+        /**
+         * 是否启用
+         * 默认关闭；开启后还需配置 api-key（或环境变量 YDC_API_KEY），两者缺一通道不生效
+         */
+        private boolean enabled = false;
+
+        /**
+         * 最多返回的结果条数（网页 + 新闻合计）
+         * 默认 5，上限 20；向 You.com 传的是「每 section」数量，合并后由通道统一截断到此值
+         */
+        private int count = 5;
+
+        /**
+         * 请求超时（秒）
+         */
+        private int timeoutSeconds = 10;
+
+        /**
+         * You.com Search API Key
+         * 建议留空，此时回退读取环境变量 YDC_API_KEY，避免密钥落入配置文件
+         */
+        private String apiKey = "";
+
+        /**
+         * You.com Search API 地址
+         * 一般无需修改，测试时可指向本地 stub
+         */
+        private String apiUrl = "https://ydc-index.io/v1/search";
+    }
+
+    @Data
     public static class Fusion {
 
         /**
@@ -158,7 +223,9 @@ public class SearchChannelProperties {
 
         /**
          * RRF 平滑常数 k
-         * 值越大越弱化高名次的优势，通常取 60
+         * 值越大越弱化高名次的优势。经典取 60（面向上千候选的检索场景），
+         * 但本链路每通道候选通常仅约 20~40 条，k=60 会把名次差异过度抹平（头部与尾部分数几乎拉不开），
+         * 建议按候选池量级调低（如 20）让头部更有区分度；具体值配合检索归因日志校准
          */
         private int rrfK = 60;
 
@@ -169,5 +236,48 @@ public class SearchChannelProperties {
          * <=0 表示不截断（全量送入 Rerank），行业经验值 40~100
          */
         private int rerankCandidateLimit = 50;
+
+        /**
+         * 各通道 RRF 贡献权重
+         * 让不同可信度的通道在融合时话语权不同：RRF 只用名次、丢弃分数量纲，无权重时各通道等权，
+         * 一个新接入 / 噪声较多的通道会与最可信通道在每个名次上平起平坐。加权后 delta = 权重 / (k + rank)
+         */
+        private ChannelWeights channelWeights = new ChannelWeights();
+    }
+
+    @Data
+    public static class ChannelWeights {
+
+        /**
+         * 意图定向（向量精查命中库）权重 最可信
+         */
+        private double intentDirected = 1.0;
+
+        /**
+         * 向量全局（跨库兜底）权重
+         */
+        private double vectorGlobal = 1.0;
+
+        /**
+         * 关键词（BM25）权重
+         */
+        private double keyword = 1.0;
+
+        /**
+         * 图谱权重
+         * 图谱为新接入通道、跑在单一全局图上、证据仅经结果侧过滤，默认降权，
+         * 待归因日志验证其 Rerank 存活率后再上调；存活率长期为 0 说明当前是纯成本
+         */
+        private double graph = 0.5;
+
+        /**
+         * 联网检索权重
+         */
+        private double webSearch = 0.5;
+
+        /**
+         * 未显式配置通道的兜底权重
+         */
+        private double defaultWeight = 1.0;
     }
 }

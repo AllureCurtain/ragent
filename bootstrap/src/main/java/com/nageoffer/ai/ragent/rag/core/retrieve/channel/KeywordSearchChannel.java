@@ -18,7 +18,6 @@
 package com.nageoffer.ai.ragent.rag.core.retrieve.channel;
 
 import cn.hutool.core.collection.CollUtil;
-import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
@@ -138,11 +137,7 @@ public class KeywordSearchChannel implements SearchChannel {
         List<NodeScore> allScores = context.getIntents().stream()
                 .flatMap(si -> si.nodeScores().stream())
                 .toList();
-        return NodeScoreFilters.kb(allScores).stream()
-                .map(ns -> ns.getNode().getCollectionName())
-                .filter(StrUtil::isNotBlank)
-                .distinct()
-                .toList();
+        return NodeScoreFilters.kbCollections(allScores);
     }
 
     private SearchChannelResult emptyResult(long startTime) {

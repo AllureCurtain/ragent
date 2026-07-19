@@ -72,6 +72,18 @@ rag:
       analyzer: ik_max_word
       search-analyzer: ik_smart
 
+  graph:
+    type: none  # 图谱后端总开关，可选 none / lightrag。lightrag 即接入后端供「后台可视化 / 检索读取」；是否参与检索、是否写入分别由 rag.search.channels.graph.enabled 与下方 ingestion.enabled 独立控制
+    lightrag:
+      base-url: http://127.0.0.1:9621
+      query-mode: mix  # naive / local / global / hybrid / mix
+      timeout-ms: 30000
+    embedding-model: qwen-emb-8b  # 与 LightRAG 的 SiliconFlow Qwen3-Embedding-8B 配置一致
+    ingestion:
+      enabled: false           # 写入同步开关：false 冻结图谱写入（向量写不再重建图谱），仅保留可视化 / 检索读取，避免为不检索的图谱持续付出实体抽取成本；true 恢复随向量写自动同步
+      async: true              # 标脏入队 + 后台防抖重建，不阻塞主写链路
+      global-workspace: false  # 跨库方案B（独立全局图）；默认关，Phase1 用 fan-out 兜底
+
   default:
     collection-name: rag_default_store
     dimension: 1536
@@ -93,10 +105,10 @@ rag:
       poll-interval-ms: 200
 
   memory:
-    history-keep-turns: 4
-    summary-start-turns: 5
+    history-keep-turns: 8
     summary-enabled: true
-    summary-max-chars: 200
+    summary-start-turns: 9
+    summary-max-chars: 400
     title-max-length: 30
 
   semaphore:
@@ -129,13 +141,28 @@ rag:
         min-intent-score: 0.4
         top-k-multiplier: 2
       keyword:
-        enabled: true
+        enabled: false
         mode: both
         top-k-multiplier: 2
+      graph:
+        enabled: false    # 图谱检索通道开关：false 不参与问答召回（后端仍在，后台可视化照常）；置 true 前需先开 rag.graph.type=lightrag
+        mode: both        # intent 仅意图域 / global 全局图 / both 意图优先，无意图时全局兜底
+        top-k-multiplier: 2
+      web-search:
+        enabled: false
+        count: 5
+        timeout-seconds: 10
+        api-key: ${YDC_API_KEY:}
     fusion:
       strategy: rrf
-      rrf-k: 60
-      rerank-candidate-limit: 50  # RRF 融合后送入 Rerank 的候选上限，<=0 不截断（经验值 40~100）
+      rrf-k: 20                   # 候选池通常仅 20~40 条，k=60 会过度平滑名次；调低至 20 让头部更有区分度（配合「检索归因」日志校准）
+      rerank-candidate-limit: 40  # RRF 融合后送入 Rerank 的候选上限，<=0 不截断（经验值 40~100）
+      channel-weights:            # 各通道 RRF 贡献权重：向量最可信=1.0；图谱为新通道、跑在全局图上、证据仅经结果侧过滤，暂降权=0.5
+        intent-directed: 1.0
+        vector-global: 1.0
+        keyword: 1.0
+        graph: 0.5
+        web-search: 0.5
 
   trace:
     enabled: true

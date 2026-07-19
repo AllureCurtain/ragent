@@ -112,10 +112,11 @@ public class MilvusRetrieverService implements RetrieverService {
         }
 
         return results.get(0).stream()
-                .map(r -> new RetrievedChunk(
-                        Objects.toString(r.getEntity().get("id"), ""),
-                        Objects.toString(r.getEntity().get("content"), ""),
-                        r.getScore()))
+                .map(r -> RetrievedChunk.builder()
+                        .id(Objects.toString(r.getEntity().get("id"), ""))
+                        .text(Objects.toString(r.getEntity().get("content"), ""))
+                        .score(r.getScore())
+                        .build())
                 .collect(Collectors.toList());
     }
 

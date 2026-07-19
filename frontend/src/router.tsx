@@ -9,6 +9,7 @@ import { DashboardPage } from "@/pages/admin/dashboard/DashboardPage";
 import { KnowledgeListPage } from "@/pages/admin/knowledge/KnowledgeListPage";
 import { KnowledgeDocumentsPage } from "@/pages/admin/knowledge/KnowledgeDocumentsPage";
 import { KnowledgeChunksPage } from "@/pages/admin/knowledge/KnowledgeChunksPage";
+import { KnowledgeGraphPage } from "@/pages/admin/knowledge-graph/KnowledgeGraphPage";
 import { BizChangeLogPage } from "@/pages/admin/change-logs/BizChangeLogPage";
 import { IntentTreePage } from "@/pages/admin/intent-tree/IntentTreePage";
 import { IntentListPage } from "@/pages/admin/intent-tree/IntentListPage";
@@ -122,6 +123,10 @@ export const router = createBrowserRouter([
       {
         path: "knowledge/:kbId/docs/:docId",
         element: <KnowledgeChunksPage />
+      },
+      {
+        path: "knowledge-graph",
+        element: <KnowledgeGraphPage />
       },
       {
         path: "intent-tree",

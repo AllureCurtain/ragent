@@ -61,4 +61,17 @@ public final class NodeScoreFilters {
                 .filter(ns -> ns.getNode() != null && ns.getNode().isKB())
                 .toList();
     }
+
+    /**
+     * 提取 KB 意图对应的 collection 名称（去空、去重）
+     * <p>
+     * 供关键词 / 图谱等通道统一「意图域」选库，避免多处重复该映射
+     */
+    public static List<String> kbCollections(List<NodeScore> scores) {
+        return kb(scores).stream()
+                .map(ns -> ns.getNode().getCollectionName())
+                .filter(StrUtil::isNotBlank)
+                .distinct()
+                .toList();
+    }
 }
