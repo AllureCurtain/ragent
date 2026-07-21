@@ -3,6 +3,7 @@ import { Navigate, createBrowserRouter } from "react-router-dom";
 import { LoginPage } from "@/pages/LoginPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { ChangeLogsPage } from "@/pages/ChangeLogsPage";
+import { DocPreviewPage } from "@/pages/DocPreviewPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { AdminLayout } from "@/pages/admin/AdminLayout";
 import { DashboardPage } from "@/pages/admin/dashboard/DashboardPage";
@@ -93,6 +94,14 @@ export const router = createBrowserRouter([
     element: (
       <RequireAuth>
         <ChangeLogsPage />
+      </RequireAuth>
+    )
+  },
+  {
+    path: "/preview/doc/:docId",
+    element: (
+      <RequireAuth>
+        <DocPreviewPage />
       </RequireAuth>
     )
   },

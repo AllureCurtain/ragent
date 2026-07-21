@@ -19,6 +19,8 @@ package com.nageoffer.ai.ragent.rag.Intent;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
+import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,7 +50,10 @@ public class SimpleIntentClassifierTests {
         String prompt = buildIntentPrompt(question);
 
         long start = System.nanoTime();
-        String chat = llmService.chat(prompt);
+        ChatRequest request = ChatRequest.builder()
+                .messages(List.of(ChatMessage.user(prompt)))
+                .build();
+        String chat = llmService.chat(request);
         long end = System.nanoTime();
 
         System.out.println(chat);
@@ -163,8 +168,10 @@ public class SimpleIntentClassifierTests {
     private CategoryScore scoreCategory(Category category, String question) {
         String prompt = buildCategoryScorePrompt(category, question);
 
-        // 这里用简单版 chat(String)，也可以用 ChatRequest
-        String resp = llmService.chat(prompt);
+        ChatRequest request = ChatRequest.builder()
+                .messages(List.of(ChatMessage.user(prompt)))
+                .build();
+        String resp = llmService.chat(request);
 
         // 期望返回：
         // {"score":0.95,"reason":"问题是 Mac 打印机连接，属于 IT 支持场景"}

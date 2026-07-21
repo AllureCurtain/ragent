@@ -20,6 +20,7 @@ package com.nageoffer.ai.ragent.rag.core.memory;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
+import com.nageoffer.ai.ragent.infra.enums.Tier;
 import com.nageoffer.ai.ragent.rag.config.MemoryProperties;
 import com.nageoffer.ai.ragent.rag.core.prompt.PromptTemplateLoader;
 import com.nageoffer.ai.ragent.rag.dao.entity.ConversationMessageDO;
@@ -42,6 +43,7 @@ import java.util.concurrent.Executor;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -162,7 +164,7 @@ class JdbcConversationMemorySummaryServiceTest {
 
     private void stubSummaryGeneration() {
         when(promptTemplateLoader.render(anyString(), anyMap())).thenReturn("summary prompt");
-        when(llmService.chat(any(ChatRequest.class))).thenReturn("updated summary");
+        when(llmService.chat(any(ChatRequest.class), eq(Tier.FAST))).thenReturn("updated summary");
     }
 
     private List<ConversationMessageDO> latestUserTurns() {

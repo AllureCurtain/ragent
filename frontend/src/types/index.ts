@@ -20,6 +20,16 @@ export interface Session {
   lastTime?: string;
 }
 
+export interface SourceRef {
+  index?: number;
+  docId: string;
+  docName?: string;
+  sourceType?: string;
+  fileType?: string | null;
+  url?: string | null;
+  excerpt?: string;
+}
+
 export interface Message {
   id: string;
   role: Role;
@@ -31,6 +41,7 @@ export interface Message {
   createdAt?: string;
   feedback?: FeedbackValue;
   status?: MessageStatus;
+  sources?: SourceRef[];
 }
 
 export interface StreamMetaPayload {
@@ -46,4 +57,5 @@ export interface MessageDeltaPayload {
 export interface CompletionPayload {
   messageId?: string | null;
   title?: string | null;
+  sources?: SourceRef[];
 }

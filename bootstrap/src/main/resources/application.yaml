@@ -131,23 +131,22 @@ rag:
         url: http://localhost:9099
 
   search:
+    # 检索漏斗三段预算，各自独立、单调收窄，启动时校验 recall-budget ≥ default-top-k 且 rerank-candidate-limit ≥ default-top-k
+    default-top-k: 10           # ③ 最终进 LLM 的条数（产品语义的 topK）
+    recall-budget: 20           # ① 每通道召回条数（绝对值，向量意图路/关键词/图谱共用）；须 ≥ default-top-k，0=回退 default-top-k
     channels:
-      vector-global:
-        confidence-threshold: 0.6
-        top-k-multiplier: 3
-        candidate-budget: 100
-      intent-directed:
-        enabled: true
-        min-intent-score: 0.4
-        top-k-multiplier: 2
+      vector:
+        enabled: true       # 向量通道总开关；意图定向与全局是同一通道按意图置信度内部二选一的两种作用域
+        intent-directed:    # 有足够置信的 KB 意图时，收窄到命中库检索
+          min-intent-score: 0.4
+        global:             # 无 / 低置信 KB 意图时，退化为全库检索兜底
+          confidence-threshold: 0.6              # KB 意图最高分低于此值 → 走全局作用域
+          single-intent-supplement-threshold: 0.8  # 仅单个 KB 意图且分数低于此值 → 走全局作用域兜底
+          candidate-budget: 0                    # 全局作用域取数上限；0=跟随 rerank-candidate-limit（超出即被下游截断属空转），确需更宽跨库广度时填正值
       keyword:
-        enabled: false
-        mode: both
-        top-k-multiplier: 2
+        enabled: false      # mode 已移除，固定为「有 KB 意图收窄命中库、无意图全局兜底」
       graph:
         enabled: false    # 图谱检索通道开关：false 不参与问答召回（后端仍在，后台可视化照常）；置 true 前需先开 rag.graph.type=lightrag
-        mode: both        # intent 仅意图域 / global 全局图 / both 意图优先，无意图时全局兜底
-        top-k-multiplier: 2
       web-search:
         enabled: false
         count: 5
@@ -156,10 +155,9 @@ rag:
     fusion:
       strategy: rrf
       rrf-k: 20                   # 候选池通常仅 20~40 条，k=60 会过度平滑名次；调低至 20 让头部更有区分度（配合「检索归因」日志校准）
-      rerank-candidate-limit: 40  # RRF 融合后送入 Rerank 的候选上限，<=0 不截断（经验值 40~100）
+      rerank-candidate-limit: 40  # ② RRF 融合后送入 Rerank 的候选池上限，<=0 不截断（经验值 40~100）
       channel-weights:            # 各通道 RRF 贡献权重：向量最可信=1.0；图谱为新通道、跑在全局图上、证据仅经结果侧过滤，暂降权=0.5
-        intent-directed: 1.0
-        vector-global: 1.0
+        vector: 1.0
         keyword: 1.0
         graph: 0.5
         web-search: 0.5
@@ -214,31 +212,41 @@ ai:
     message-chunk-size: 1
 
   chat:
-    default-model: qwen-plus
-    deep-thinking-model: qwen3-max
     candidates:
       - id: qwen-plus
         provider: bailian
         model: qwen-plus-latest
-        priority: 1
+      - id: qwen-flash
+        provider: bailian
+        model: qwen-flash
       - id: qwen3-local
         provider: ollama
         model: qwen3:8b-fp16
-        priority: 2
       - id: qwen3-max
         provider: bailian
         model: qwen3-max
         supports-thinking: true
-        priority: 3
       - id: glm-4.7
         provider: siliconflow
         model: Pro/zai-org/GLM-4.7
         supports-thinking: true
-        priority: 4
       - id: gpt-5.4
         provider: aihubmix
         model: gpt-5.4
-        priority: 5
+
+    default-tier: standard
+    deep-thinking-tier: deep
+
+    tiers:
+      fast:
+        candidates: [ qwen-flash, qwen-plus, qwen3-local ]
+        timeout-ms: 5000
+      standard:
+        candidates: [ qwen-plus, qwen3-local, gpt-5.4 ]
+        timeout-ms: 30000
+      deep:
+        candidates: [ qwen3-max, glm-4.7 ]
+        timeout-ms: 120000
 
   embedding:
     default-model: qwen-emb-8b

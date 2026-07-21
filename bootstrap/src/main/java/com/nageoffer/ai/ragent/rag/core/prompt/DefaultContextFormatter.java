@@ -44,17 +44,17 @@ public class DefaultContextFormatter implements ContextFormatter {
     private final PromptTemplateLoader templateLoader;
 
     @Override
-    public String formatKbContext(List<NodeScore> kbIntents, Map<String, List<RetrievedChunk>> rerankedByIntent, int topK) {
+    public String formatKbContext(List<NodeScore> kbIntents, Map<String, List<RetrievedChunk>> rerankedByIntent, int contextTopK) {
         if (rerankedByIntent == null || rerankedByIntent.isEmpty()) {
             return "";
         }
         if (CollUtil.isEmpty(kbIntents)) {
-            return formatChunksWithoutIntent(rerankedByIntent, topK);
+            return formatChunksWithoutIntent(rerankedByIntent, contextTopK);
         }
         if (kbIntents.size() > 1) {
-            return formatMultiIntentContext(kbIntents, rerankedByIntent, topK);
+            return formatMultiIntentContext(kbIntents, rerankedByIntent, contextTopK);
         }
-        return formatSingleIntentContext(kbIntents.get(0), rerankedByIntent, topK);
+        return formatSingleIntentContext(kbIntents.get(0), rerankedByIntent, contextTopK);
     }
 
     /**

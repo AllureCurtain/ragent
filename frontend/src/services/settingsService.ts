@@ -55,8 +55,16 @@ export interface SystemSettings {
 
 export interface ModelGroup {
   defaultModel?: string | null;
-  deepThinkingModel?: string | null;
   candidates: ModelCandidate[];
+  // chat 组档位机制字段，embedding/rerank 为空
+  defaultTier?: string | null;
+  deepThinkingTier?: string | null;
+  tiers?: Record<string, TierConfig> | null;
+}
+
+export interface TierConfig {
+  candidates: string[];
+  timeoutMs?: number | null;
 }
 
 export interface ModelCandidate {

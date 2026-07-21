@@ -29,6 +29,7 @@ import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.trace.RagTraceNode;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
+import com.nageoffer.ai.ragent.infra.enums.Tier;
 import com.nageoffer.ai.ragent.rag.core.prompt.PromptTemplateLoader;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -103,28 +104,25 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
         String systemPrompt = promptTemplateLoader.load(QUERY_REWRITE_AND_SPLIT_PROMPT_PATH);
         ChatRequest req = buildRewriteRequest(systemPrompt, normalizedQuestion, history);
 
+        // 快速档调用；解析失败或调用失败均用归一化问题兜底（档位内多候选已提供传输容错，不再跨档升级）
+        RewriteResult fallback = new RewriteResult(normalizedQuestion, List.of(normalizedQuestion));
+        RewriteResult result;
         try {
-            String raw = llmService.chat(req);
-            RewriteResult parsed = parseRewriteAndSplit(raw);
-
-            if (parsed != null) {
-                log.info("""
-                        RAG用户问题查询改写+拆分：
-                        原始问题：{}
-                        归一化后：{}
-                        改写结果：{}
-                        子问题：{}
-                        """, originalQuestion, normalizedQuestion, parsed.rewrittenQuestion(), parsed.subQuestions());
-                return parsed;
-            }
-
-            log.warn("查询改写+拆分解析失败，使用归一化问题兜底 - normalizedQuestion={}", normalizedQuestion);
+            RewriteResult parsed = parseRewriteAndSplit(llmService.chat(req, Tier.FAST));
+            result = parsed != null ? parsed : fallback;
         } catch (Exception e) {
-            log.warn("查询改写+拆分 LLM 调用失败，使用归一化问题兜底 - question={}，normalizedQuestion={}", originalQuestion, normalizedQuestion, e);
+            log.warn("查询改写 LLM 调用失败，使用归一化问题兜底", e);
+            result = fallback;
         }
 
-        // 统一兜底逻辑
-        return new RewriteResult(normalizedQuestion, List.of(normalizedQuestion));
+        log.info("""
+                RAG用户问题查询改写+拆分：
+                原始问题：{}
+                归一化后：{}
+                改写结果：{}
+                子问题：{}
+                """, originalQuestion, normalizedQuestion, result.rewrittenQuestion(), result.subQuestions());
+        return result;
     }
 
     private ChatRequest buildRewriteRequest(String systemPrompt,

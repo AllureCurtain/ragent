@@ -142,7 +142,6 @@ public class RAGSettingsController {
         }
         return AISettings.ModelGroup.builder()
                 .defaultModel(group.getDefaultModel())
-                .deepThinkingModel(group.getDeepThinkingModel())
                 .candidates(group.getCandidates() == null
                         ? null
                         : group.getCandidates().stream()
@@ -157,7 +156,23 @@ public class RAGSettingsController {
                                     .supportsThinking(c.getSupportsThinking())
                                     .build())
                           .collect(Collectors.toList()))
+                .defaultTier(group.getDefaultTier())
+                .deepThinkingTier(group.getDeepThinkingTier())
+                .tiers(toTiers(group.getTiers()))
                 .build();
+    }
+
+    private Map<String, AISettings.TierConfig> toTiers(Map<String, AIModelProperties.TierConfig> tiers) {
+        if (tiers == null) {
+            return null;
+        }
+        return tiers.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        e -> AISettings.TierConfig.builder()
+                                .candidates(e.getValue().getCandidates())
+                                .timeoutMs(e.getValue().getTimeoutMs())
+                                .build()));
     }
 
     private String maskApiKey(String apiKey) {

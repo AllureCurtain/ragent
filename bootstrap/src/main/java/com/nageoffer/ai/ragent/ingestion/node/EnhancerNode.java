@@ -31,6 +31,7 @@ import com.nageoffer.ai.ragent.ingestion.prompt.EnhancerPromptManager;
 import com.nageoffer.ai.ragent.ingestion.util.JsonResponseParser;
 import com.nageoffer.ai.ragent.ingestion.util.PromptTemplateRenderer;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
+import com.nageoffer.ai.ragent.infra.enums.Tier;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -126,7 +127,7 @@ public class EnhancerNode implements IngestionNode {
     }
 
     private String chat(ChatRequest request, String modelId) {
-        return llmService.chat(request, modelId);
+        return llmService.chat(request, Tier.FAST, modelId);
     }
 
     private void applyTaskResult(IngestionContext context, EnhanceType type, String response) {

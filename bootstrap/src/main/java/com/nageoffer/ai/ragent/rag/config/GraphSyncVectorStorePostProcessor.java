@@ -18,8 +18,8 @@
 package com.nageoffer.ai.ragent.rag.config;
 
 import com.nageoffer.ai.ragent.rag.core.graph.LightRagClient;
-import com.nageoffer.ai.ragent.rag.core.vector.GraphSyncingVectorStoreService;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorStoreService;
+import com.nageoffer.ai.ragent.rag.core.vector.decorator.GraphSyncingVectorStoreService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;

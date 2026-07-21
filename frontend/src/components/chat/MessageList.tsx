@@ -268,7 +268,7 @@ export function MessageList({ messages, isLoading, isStreaming, sessionKey }: Me
             className={cn(index === messages.length - 1 && "animate-fade-up")}
             onMouseDown={handleTripleClickDown}
           >
-            <MessageItem message={message} isLast={index === messages.length - 1} />
+            <MessageItem message={message} />
           </div>
         )}
       />

@@ -17,10 +17,13 @@
 
 package com.nageoffer.ai.ragent.rag.service.bo;
 
+import com.nageoffer.ai.ragent.framework.convention.SourceRef;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.util.List;
 
 /**
  * 对话消息业务对象
@@ -60,4 +63,9 @@ public class ConversationMessageBO {
      * 深度思考耗时（秒）
      */
     private Integer thinkingDuration;
+
+    /**
+     * 回答来源，文档级来源列表（仅 assistant 消息可能有）
+     */
+    private List<SourceRef> sources;
 }

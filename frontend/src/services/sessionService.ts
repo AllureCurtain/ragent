@@ -1,4 +1,5 @@
 import { api } from "@/services/api";
+import type { SourceRef } from "@/types";
 
 export interface ConversationVO {
   conversationId: string;
@@ -14,6 +15,7 @@ export interface ConversationMessageVO {
   thinkingContent?: string | null;
   thinkingDuration?: number | null;
   vote: number | null;
+  sources?: SourceRef[] | null;
   createTime?: string;
 }
 

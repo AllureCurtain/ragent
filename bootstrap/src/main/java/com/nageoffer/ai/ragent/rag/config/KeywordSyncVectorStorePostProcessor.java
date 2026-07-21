@@ -17,9 +17,9 @@
 
 package com.nageoffer.ai.ragent.rag.config;
 
-import com.nageoffer.ai.ragent.rag.core.vector.KeywordSyncingVectorStoreService;
+import com.nageoffer.ai.ragent.rag.core.keyword.KeywordIndexService;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorStoreService;
-import com.nageoffer.ai.ragent.rag.core.vector.keyword.KeywordIndexService;
+import com.nageoffer.ai.ragent.rag.core.vector.decorator.KeywordSyncingVectorStoreService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;

@@ -26,7 +26,7 @@ import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import com.nageoffer.ai.ragent.infra.embedding.EmbeddingService;
-import com.nageoffer.ai.ragent.rag.core.retrieve.RetrieverService;
+import com.nageoffer.ai.ragent.rag.core.vector.VectorRetrieverService;
 import io.milvus.v2.client.MilvusClientV2;
 import io.milvus.v2.service.vector.request.InsertReq;
 import io.milvus.v2.service.vector.response.InsertResp;
@@ -58,7 +58,7 @@ public class InvoiceIndexDocumentTests {
     private final LLMService llmService;
     private final EmbeddingService embeddingService;
     private final MilvusClientV2 milvusClient;
-    private final RetrieverService retrieverService;
+    private final VectorRetrieverService retrieverService;
     private final RAGDefaultProperties ragDefaultProperties;
 
     private final Tika tika = new Tika();
@@ -172,7 +172,10 @@ public class InvoiceIndexDocumentTests {
                 %s
                 """
                 .formatted(fileContent);
-        return llmService.chat(prompt);
+        ChatRequest req = ChatRequest.builder()
+                .messages(List.of(ChatMessage.user(prompt)))
+                .build();
+        return llmService.chat(req);
     }
 
     @Test

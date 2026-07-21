@@ -21,6 +21,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * 对话消息实体
  *
@@ -94,6 +96,11 @@ public class ChatMessage {
      * 深度思考耗时（秒，仅 ASSISTANT 角色可能携带）
      */
     private Integer thinkingDuration;
+
+    /**
+     * 回答来源（文档级来源列表，仅 ASSISTANT 角色可能携带）
+     */
+    private List<SourceRef> sources;
 
     public ChatMessage(Role role, String content) {
         this.role = role;
