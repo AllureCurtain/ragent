@@ -266,6 +266,7 @@ public class DefaultContextFormatter implements ContextFormatter {
      */
     private String resolveTitle(List<RetrievedChunk> group) {
         return group.stream()
+                .filter(chunk -> StrUtil.isNotBlank(chunk.getDocId()))
                 .map(RetrievedChunk::getDocName)
                 .filter(StrUtil::isNotBlank)
                 .map(DefaultContextFormatter::stripExtension)
