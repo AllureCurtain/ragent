@@ -124,9 +124,6 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const avatarUrl = user?.avatar?.trim();
   const showAvatar = Boolean(avatarUrl) && !avatarFailed;
   const avatarFallback = (user?.username || user?.userId || "用户").slice(0, 1).toUpperCase();
-  const sessionTitleFont =
-    "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", \"Helvetica Neue\", Arial, sans-serif";
-
   const startRename = (id: string, title: string) => {
     setRenamingId(id);
     setRenameValue(title || "新对话");
@@ -157,127 +154,93 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
     <>
       <div
         className={cn(
-          "fixed inset-0 z-30 bg-slate-900/30 backdrop-blur-sm transition-opacity lg:hidden",
+          "fixed inset-0 z-30 bg-[var(--overlay)] backdrop-blur-[2px] transition-opacity lg:hidden",
           isOpen ? "opacity-100" : "pointer-events-none opacity-0"
         )}
         onClick={onClose}
       />
       <aside
         className={cn(
-          "fixed left-0 top-0 z-40 flex h-screen w-[280px] flex-shrink-0 flex-col bg-[#FAFAFA] p-3 transition-transform lg:static lg:h-screen lg:translate-x-0",
+          "fixed left-0 top-0 z-40 flex h-dvh w-[288px] flex-shrink-0 flex-col border-r border-[var(--border-default)] bg-[var(--bg-tertiary)] p-3 transition-transform duration-300 lg:static lg:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="border-b border-[#F0F0F0] pb-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#3B82F6]">
-              <Bot className="h-5 w-5 text-white" />
-            </div>
-            <div style={{ fontFamily: sessionTitleFont }}>
-              <p className="text-base font-semibold text-[#1A1A1A]">NexusQA</p>
-              <p className="text-xs text-[#999999]">智能问答平台</p>
-            </div>
+        <div className="flex h-12 items-center gap-3 px-1">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-primary)] text-[var(--text-on-accent)] shadow-[var(--shadow-sm)]">
+            <Bot className="h-[18px] w-[18px]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold text-[var(--text-primary)]">NexusQA</p>
+            <p className="truncate text-[11px] text-[var(--text-tertiary)]">知识检索工作区</p>
+          </div>
+          {user?.role === "admin" ? (
+            <button
+              type="button"
+              className="flex h-9 w-9 items-center justify-center rounded-[10px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              onClick={() => {
+                window.open("/admin", "_blank");
+                onClose();
+              }}
+              aria-label="打开管理后台"
+              title="管理后台"
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+        <div className="space-y-2 py-3">
+          <button
+            type="button"
+            className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-[var(--accent-primary)] px-4 text-sm font-semibold text-[var(--text-on-accent)] shadow-[0_1px_2px_rgba(15,48,45,0.14)] transition-colors hover:bg-[var(--accent-hover)]"
+            onClick={() => {
+              createSession().catch(() => null);
+              navigate("/chat");
+              onClose();
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            新建对话
+          </button>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索会话"
+              aria-label="搜索会话"
+              className="h-10 w-full rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-9 pr-3 text-sm text-[var(--text-primary)] shadow-[var(--shadow-xs)] transition-[border-color,box-shadow] placeholder:text-[var(--text-muted)] focus:border-[var(--border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-light)]"
+            />
           </div>
         </div>
-        <div className="py-3 space-y-4">
-          <div className="relative overflow-hidden rounded-2xl border border-[#E6EEF6] bg-gradient-to-br from-[#F0F9FF] via-white to-[#FEF3C7] p-3 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
-            <span
-              aria-hidden="true"
-              className="absolute -right-10 -top-10 h-24 w-24 rounded-full bg-[#BAE6FD]/70 blur-2xl"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute -left-12 -bottom-10 h-28 w-28 rounded-full bg-[#FDE68A]/70 blur-2xl"
-            />
-            <div className="relative">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[11px] font-semibold text-[#94A3B8]">快速开始</span>
-                <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-[#2563EB]">
-                  新内容
-                </span>
-              </div>
-              <button
-                type="button"
-                className="mt-2 flex w-full items-center gap-3 rounded-2xl bg-white/90 px-4 py-3 text-left shadow-[0_10px_20px_rgba(15,23,42,0.08)] transition-all hover:-translate-y-[1px] hover:shadow-[0_16px_30px_rgba(15,23,42,0.12)]"
-                onClick={() => {
-                  createSession().catch(() => null);
-                  navigate("/chat");
-                  onClose();
-                }}
-              >
-                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#60A5FA] to-[#2563EB] text-white shadow-[0_6px_14px_rgba(37,99,235,0.3)]">
-                  <Plus className="h-4 w-4" />
-                </span>
-                <span className="flex-1">
-                  <span className="block text-sm font-semibold text-[#1F2937]">新建对话</span>
-                  <span className="block text-xs text-[#94A3B8]">从空白开始</span>
-                </span>
-              </button>
-              {user?.role === "admin" ? (
-                <button
-                  type="button"
-                  className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 px-3 py-1.5 text-xs font-semibold text-[#1D4ED8] transition-colors hover:bg-white"
-                  onClick={() => {
-                    window.open("/admin", "_blank");
-                    onClose();
-                  }}
-                >
-                  <Settings className="h-3.5 w-3.5" />
-                  管理后台
-                </button>
-              ) : null}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-[#E6EEF6] bg-white p-3 shadow-[0_12px_26px_rgba(15,23,42,0.06)]">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] font-semibold text-[#94A3B8]">搜索对话</span>
-              <span className="text-[10px] text-[#CBD5F5]">Ctrl / Cmd + K</span>
-            </div>
-            <div className="mt-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9CA3AF]" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索对话..."
-                  className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-[#F8FAFC] pl-9 pr-3 text-sm text-[#1F2937] placeholder:text-[#9CA3AF] focus:border-[#93C5FD] focus:outline-none transition-colors"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="relative flex-1 min-h-0">
-          <div className="h-full overflow-y-auto sidebar-scroll">
+        <nav className="relative min-h-0 flex-1" aria-label="会话历史">
+          <div className="h-full overflow-y-auto pr-1 sidebar-scroll">
             {sessions.length === 0 && (!sessionsLoaded || isLoading) ? (
-              <div
-                className="flex h-full items-center justify-center text-[#999999]"
-                style={{ fontFamily: sessionTitleFont }}
-              >
+              <div className="flex h-full items-center justify-center text-[var(--text-tertiary)]">
                 <Loading label="加载会话中" />
               </div>
             ) : filteredSessions.length === 0 ? (
-              <div
-                className="flex h-full flex-col items-center justify-center text-[#999999]"
-                style={{ fontFamily: sessionTitleFont }}
-              >
-                <MessageSquare className="h-16 w-16" />
-                <p className="mt-2 text-[14px]">暂无对话记录</p>
+              <div className="flex h-full flex-col items-center justify-center px-6 text-center text-[var(--text-tertiary)]">
+                <span className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-[var(--bg-hover)]">
+                  <MessageSquare className="h-4 w-4" />
+                </span>
+                <p className="mt-3 text-sm font-medium text-[var(--text-secondary)]">没有匹配的会话</p>
+                <p className="mt-1 text-xs">调整搜索词，或新建一个对话。</p>
               </div>
             ) : (
               <div>
                 {groupedSessions.map((group, index) => (
-                  <div key={group.label} className={cn("flex flex-col", index === 0 ? "mt-0" : "mt-4")}>
-                    <p className="mb-1.5 pl-3 text-[12px] font-normal leading-[18px] text-[#999999]">
+                  <div key={group.label} className={cn("flex flex-col", index === 0 ? "mt-1" : "mt-4")}>
+                    <p className="mb-1.5 px-2 text-[11px] font-semibold text-[var(--text-tertiary)]">
                       {group.label}
                     </p>
                     {group.items.map((session) => (
                       <div
                         key={session.id}
                         className={cn(
-                          "group my-[1px] flex min-h-[40px] cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-[14px] leading-[22px] transition-colors duration-200",
+                          "group relative my-px flex min-h-10 cursor-pointer items-center justify-between gap-2 rounded-[9px] px-3 py-2 text-sm transition-colors duration-200",
                           currentSessionId === session.id
-                            ? "bg-[#DBEAFE] text-[#2563EB]"
-                            : "text-[#333333] hover:bg-[#F5F5F5]"
+                            ? "bg-[var(--accent-light)] font-semibold text-[var(--accent-primary)]"
+                            : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                         )}
                         role="button"
                         tabIndex={0}
@@ -317,7 +280,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                             onBlur={() => {
                               commitRename().catch(() => null);
                             }}
-                            className="h-6 flex-1 rounded-md border border-[#E5E5E5] bg-white px-2 text-[14px] leading-[22px] text-[#333333] focus:border-[#2563EB] focus:outline-none"
+                            className="h-7 min-w-0 flex-1 rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-sm text-[var(--text-primary)] focus:border-[var(--border-focus)] focus:outline-none"
                           />
                         ) : (
                           <span className="min-w-0 flex-1 truncate font-normal">
@@ -329,10 +292,10 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                             <button
                               type="button"
                               className={cn(
-                                "flex h-6 w-6 items-center justify-center rounded text-[#666666] transition-opacity duration-150 hover:bg-[rgba(0,0,0,0.06)]",
+                                "flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-[opacity,background-color] duration-150 hover:bg-[var(--bg-primary)] hover:text-[var(--text-primary)] focus-visible:opacity-100",
                                 currentSessionId === session.id
-                                  ? "pointer-events-auto opacity-100 text-[#2563EB]"
-                                  : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
+                                  ? "pointer-events-auto opacity-100 text-[var(--accent-primary)]"
+                                  : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
                               )}
                               onClick={(event) => event.stopPropagation()}
                               aria-label="会话操作"
@@ -342,14 +305,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
                             align="start"
-                            className="min-w-[120px] rounded-lg border-0 bg-white p-0 py-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+                            className="min-w-[132px]"
                           >
                             <DropdownMenuItem
                               onClick={(event) => {
                                 event.stopPropagation();
                                 startRename(session.id, session.title || "新对话");
                               }}
-                              className="px-4 py-2 text-[14px] text-[#333333] focus:bg-[#F5F5F5] focus:text-[#333333] data-[highlighted]:bg-[#F5F5F5] data-[highlighted]:text-[#333333]"
+                              className="text-[var(--text-secondary)]"
                             >
                               <Pencil className="mr-2 h-4 w-4" />
                               重命名
@@ -362,7 +325,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                                   title: session.title || "新对话"
                                 });
                               }}
-                              className="px-4 py-2 text-[14px] text-[#FF4D4F] focus:bg-[#F5F5F5] focus:text-[#FF4D4F] data-[highlighted]:bg-[#F5F5F5] data-[highlighted]:text-[#FF4D4F]"
+                              className="text-[var(--error)] focus:text-[var(--error)]"
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
                               删除
@@ -378,18 +341,18 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
           </div>
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-5 bg-gradient-to-b from-transparent to-[#FAFAFA]"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-5 bg-gradient-to-b from-transparent to-[var(--bg-tertiary)]"
           />
-        </div>
-        <div className="mt-auto pt-3">
+        </nav>
+        <div className="mt-2 border-t border-[var(--border-light)] pt-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-lg p-2 text-left transition-colors hover:bg-[#F5F5F5] data-[state=open]:bg-[#EEEEEE]"
+                className="flex min-h-11 w-full items-center gap-2.5 rounded-[10px] p-2 text-left transition-colors hover:bg-[var(--bg-hover)] data-[state=open]:bg-[var(--bg-hover)]"
                 aria-label="用户菜单"
               >
-                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-[#3B82F6] text-white">
+                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-[9px] bg-[var(--accent-primary)] text-[var(--text-on-accent)]">
                   {showAvatar ? (
                     <img
                       src={avatarUrl}
@@ -401,13 +364,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                     <span className="text-sm font-medium">{avatarFallback}</span>
                   )}
                 </div>
-                <span className="flex-1 truncate text-sm font-medium text-[#1A1A1A]">
+                <span className="flex-1 truncate text-sm font-semibold text-[var(--text-primary)]">
                   {(() => {
                     const fallback = user?.username || user?.userId || "用户";
                     return /^\d+$/.test(fallback) ? "用户" : fallback;
                   })()}
                 </span>
-                <MoreHorizontal className="h-4 w-4 text-[#999999]" />
+                <MoreHorizontal className="h-4 w-4 text-[var(--text-tertiary)]" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-48">

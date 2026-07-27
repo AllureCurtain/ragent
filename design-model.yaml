@@ -1,0 +1,70 @@
+# design-model.yaml - locked product design model
+meta:
+  name: NexusQA
+  industry: agentic-rag / knowledge-operations
+  register: product
+  persona: Calm Precision
+  design_read: "Agentic RAG knowledge workspace · precise + restrained + trustworthy · SPECTACLE=2 · feedback motion only"
+
+dials:
+  soul: 6
+  spectacle: 2
+  density: 8
+
+color:
+  page: "#E9EEED"
+  bg: "#FBFDFC"
+  panel_2: "#F1F5F4"
+  ink_1: "#102322"
+  ink_2: "#354B49"
+  ink_3: "#617573"
+  accent: "#176C6B"
+  accent_2: "#C4633F"
+  accent_soft: "rgba(23,108,107,0.10)"
+  on_accent: "#F7FCFB"
+  border: "rgba(16,35,34,0.09)"
+  rail: "#13201F"
+  rail_2: "#1B2B29"
+  rail_ink: "#A9BBB8"
+  success: "#357A4E"
+  warning: "#A66B16"
+  danger: "#B9473D"
+  strategy: committed
+
+type:
+  display: "Manrope, PingFang SC, Microsoft YaHei, system-ui, sans-serif"
+  display_weight: 700
+  body: "Manrope, PingFang SC, Microsoft YaHei, system-ui, sans-serif"
+  body_weight: 400
+  mono: "JetBrains Mono, SFMono-Regular, Consolas, monospace"
+  scale_px: [12, 14, 16, 18, 20, 24]
+  display_tracking: "0"
+  display_leading: 1.2
+
+substrate:
+  page: tinted-cool-neutral
+  cards: hairline-or-none with hue-tinted whisper shadow
+  radius_scale: "6px / 10px / 14px / 18px"
+  motion_easing: "cubic-bezier(0.16, 1, 0.3, 1)"
+  motion_duration: "160ms / 240ms / 360ms"
+  reduced_motion: "remove decorative transforms and loops; render terminal state immediately"
+
+hero_engine:
+  type: none
+  detail: "Product UI uses component, chart, and streaming feedback motion only."
+  reduced_motion: "All state remains visible with transitions disabled."
+
+structure:
+  auth_shell: "focused two-zone composition that keeps the product identity in the first viewport"
+  chat_shell: "session rail + reading canvas + contextual sources drawer"
+  admin_shell: "grouped dark rail + compact topbar + dense light content surface"
+  nav_depth_max: 3
+  mobile: "chat drawer and compact headers; admin rail becomes an overlay drawer"
+
+baseline_drift:
+  - "Generic blue/indigo accents and gradient/glow treatments compete across chat and admin."
+  - "Pure white surfaces, raw Tailwind colors, and hardcoded hex values bypass semantic tokens."
+  - "Space Grotesk and DM Sans are unexamined defaults and Chinese text falls through inconsistently."
+  - "Radius, shadow, and button shapes vary between shared components and page-local implementations."
+  - "Continuous animation lacks a complete prefers-reduced-motion backstop."
+  - "Chat, login, and admin currently read as separate products rather than one system."

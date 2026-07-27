@@ -48,14 +48,14 @@ function faviconUrl(url?: string | null): string | null {
 
 // 本地文件按扩展名选类型图标与配色
 function fileGlyph(ext: string): { Icon: typeof File; color: string } {
-  if (ext === "pdf") return { Icon: FileText, color: "text-[#E5484D]" };
-  if (ext === "xlsx" || ext === "xls" || ext === "csv") return { Icon: Sheet, color: "text-[#12A150]" };
-  if (ext === "doc" || ext === "docx") return { Icon: FileText, color: "text-[#2563EB]" };
-  if (ext === "ppt" || ext === "pptx") return { Icon: Presentation, color: "text-[#EA7B2C]" };
-  if (ext === "md" || ext === "markdown") return { Icon: FileText, color: "text-[#2563EB]" };
-  if (ext === "txt") return { Icon: FileText, color: "text-[#666666]" };
-  if (IMAGE_EXTS.includes(ext)) return { Icon: ImageIcon, color: "text-[#8B5CF6]" };
-  return { Icon: File, color: "text-[#9AA0A6]" };
+  if (ext === "pdf") return { Icon: FileText, color: "text-[var(--error)]" };
+  if (ext === "xlsx" || ext === "xls" || ext === "csv") return { Icon: Sheet, color: "text-[var(--success)]" };
+  if (ext === "doc" || ext === "docx") return { Icon: FileText, color: "text-[var(--accent-primary)]" };
+  if (ext === "ppt" || ext === "pptx") return { Icon: Presentation, color: "text-[var(--accent-secondary)]" };
+  if (ext === "md" || ext === "markdown") return { Icon: FileText, color: "text-[var(--accent-primary)]" };
+  if (ext === "txt") return { Icon: FileText, color: "text-[var(--text-secondary)]" };
+  if (IMAGE_EXTS.includes(ext)) return { Icon: ImageIcon, color: "text-[var(--info)]" };
+  return { Icon: File, color: "text-[var(--text-tertiary)]" };
 }
 
 interface SourceIconProps {
@@ -84,7 +84,7 @@ export function SourceIcon({ source, className }: SourceIconProps) {
     );
   }
   if (external) {
-    return <Globe className={cn("text-[#9AA0A6]", className)} />;
+    return <Globe className={cn("text-[var(--text-tertiary)]", className)} />;
   }
   const { Icon, color } = fileGlyph(fileExt(source));
   return <Icon className={cn(color, className)} />;

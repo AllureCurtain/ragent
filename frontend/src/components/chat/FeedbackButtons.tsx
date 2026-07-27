@@ -126,12 +126,12 @@ export function FeedbackButtons({
       )}
     >
       {/* 复制：图标 + 下拉箭头一体 悬停整块高亮 仅悬停箭头才向上展开菜单 */}
-      <div className="group/copy flex items-center rounded-md transition-colors hover:bg-[#F5F5F5]">
+      <div className="group/copy flex items-center rounded-md transition-colors hover:bg-[var(--bg-hover)]">
         <button
           type="button"
           onClick={() => handleCopy("text")}
           aria-label="复制内容"
-          className="flex h-7 items-center rounded-l-md pl-2 pr-0.5 text-[#999999] outline-none transition-colors group-hover/copy:text-[#666666]"
+          className="flex h-7 items-center rounded-l-md pl-2 pr-0.5 text-[var(--text-muted)] outline-none transition-colors group-hover/copy:text-[var(--text-secondary)]"
         >
           <Copy className="h-4 w-4" />
         </button>
@@ -140,7 +140,7 @@ export function FeedbackButtons({
             aria-label="复制选项"
             onMouseEnter={openCopyMenu}
             onMouseLeave={scheduleCloseCopyMenu}
-            className="flex h-7 items-center rounded-r-md pl-0 pr-1.5 text-[#999999] outline-none transition-colors group-hover/copy:text-[#666666]"
+            className="flex h-7 items-center rounded-r-md pl-0 pr-1.5 text-[var(--text-muted)] outline-none transition-colors group-hover/copy:text-[var(--text-secondary)]"
           >
             <ChevronDown
               className={cn("h-3 w-3 transition-transform duration-200", copyOpen && "rotate-180")}
@@ -158,13 +158,13 @@ export function FeedbackButtons({
           >
             <DropdownMenuItem
               onSelect={() => handleCopy("markdown")}
-              className="focus:bg-[#F5F5F5] focus:text-[#1A1A1A]"
+              className="focus:bg-[var(--bg-hover)] focus:text-[var(--text-primary)]"
             >
               复制为 Markdown
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => handleCopy("text")}
-              className="focus:bg-[#F5F5F5] focus:text-[#1A1A1A]"
+              className="focus:bg-[var(--bg-hover)] focus:text-[var(--text-primary)]"
             >
               复制
             </DropdownMenuItem>
@@ -177,8 +177,10 @@ export function FeedbackButtons({
         onClick={() => handleFeedback("like")}
         aria-label="点赞"
         className={cn(
-          "h-7 w-7 rounded-md hover:bg-[#F5F5F5]",
-          feedback === "like" ? "text-[#1A1A1A]" : "text-[#999999] hover:text-[#666666]"
+          "h-7 w-7 rounded-md hover:bg-[var(--bg-hover)]",
+          feedback === "like"
+            ? "text-[var(--accent-primary)]"
+            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
         )}
       >
         {feedback === "like" ? (
@@ -193,8 +195,10 @@ export function FeedbackButtons({
         onClick={() => handleFeedback("dislike")}
         aria-label="点踩"
         className={cn(
-          "h-7 w-7 rounded-md hover:bg-[#F5F5F5]",
-          feedback === "dislike" ? "text-[#1A1A1A]" : "text-[#999999] hover:text-[#666666]"
+          "h-7 w-7 rounded-md hover:bg-[var(--bg-hover)]",
+          feedback === "dislike"
+            ? "text-[var(--error)]"
+            : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
         )}
       >
         {feedback === "dislike" ? (

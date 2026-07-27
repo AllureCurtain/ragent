@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Database, FileBarChart, FolderOpen, Layers, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  Database,
+  FileBarChart,
+  FolderOpen,
+  Layers,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2
+} from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -11,7 +20,7 @@ import {
   TableCell,
   TableHead,
   TableHeader,
-  TableRow,
+  TableRow
 } from "@/components/ui/table";
 import {
   AlertDialog,
@@ -21,15 +30,26 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
-  AlertDialogTitle,
+  AlertDialogTitle
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 
 import type { KnowledgeBase, PageResult } from "@/services/knowledgeService";
-import { deleteKnowledgeBase, getKnowledgeBasesPage, renameKnowledgeBase } from "@/services/knowledgeService";
+import {
+  deleteKnowledgeBase,
+  getKnowledgeBasesPage,
+  renameKnowledgeBase
+} from "@/services/knowledgeService";
 import { CreateKnowledgeBaseDialog } from "@/components/admin/CreateKnowledgeBaseDialog";
 import { getErrorMessage } from "@/utils/error";
 import { cn } from "@/lib/utils";
@@ -77,64 +97,70 @@ export function KnowledgeListPage() {
     }
   };
 
-  const loadStats = useCallback(async (name = keyword) => {
-    const requestId = ++statsRequestId.current;
-    const normalized = name.trim();
-    setStatsLoading(true);
-    try {
-      const firstPage = await getKnowledgeBasesPage(1, STATS_PAGE_SIZE, normalized || undefined);
-      if (statsRequestId.current !== requestId) return;
-
-      let documentTotal = 0;
-      let activeTotal = 0;
-      const creatorNames = new Set<string>();
-      const addRecords = (records: KnowledgeBase[] = []) => {
-        records.forEach((kb) => {
-          const docCount = kb.documentCount ?? 0;
-          documentTotal += docCount;
-          if (docCount > 0) {
-            activeTotal += 1;
-          }
-          if (kb.createdBy) {
-            creatorNames.add(kb.createdBy);
-          }
-        });
-      };
-
-      addRecords(firstPage.records || []);
-
-      const totalCount = firstPage.total ?? (firstPage.records?.length || 0);
-      const totalPages =
-        firstPage.pages || Math.max(1, Math.ceil(totalCount / STATS_PAGE_SIZE));
-
-      for (let page = 2; page <= totalPages; page += 1) {
-        const nextPage = await getKnowledgeBasesPage(page, STATS_PAGE_SIZE, normalized || undefined);
+  const loadStats = useCallback(
+    async (name = keyword) => {
+      const requestId = ++statsRequestId.current;
+      const normalized = name.trim();
+      setStatsLoading(true);
+      try {
+        const firstPage = await getKnowledgeBasesPage(1, STATS_PAGE_SIZE, normalized || undefined);
         if (statsRequestId.current !== requestId) return;
-        addRecords(nextPage.records || []);
-      }
 
-      if (statsRequestId.current !== requestId) return;
-      setStats({
-        totalCount,
-        documentCount: documentTotal,
-        activeCount: activeTotal,
-        creatorCount: creatorNames.size
-      });
-    } catch (error) {
-      if (statsRequestId.current !== requestId) return;
-      console.error(error);
-      setStats({
-        totalCount: 0,
-        documentCount: 0,
-        activeCount: 0,
-        creatorCount: 0
-      });
-    } finally {
-      if (statsRequestId.current === requestId) {
-        setStatsLoading(false);
+        let documentTotal = 0;
+        let activeTotal = 0;
+        const creatorNames = new Set<string>();
+        const addRecords = (records: KnowledgeBase[] = []) => {
+          records.forEach((kb) => {
+            const docCount = kb.documentCount ?? 0;
+            documentTotal += docCount;
+            if (docCount > 0) {
+              activeTotal += 1;
+            }
+            if (kb.createdBy) {
+              creatorNames.add(kb.createdBy);
+            }
+          });
+        };
+
+        addRecords(firstPage.records || []);
+
+        const totalCount = firstPage.total ?? (firstPage.records?.length || 0);
+        const totalPages = firstPage.pages || Math.max(1, Math.ceil(totalCount / STATS_PAGE_SIZE));
+
+        for (let page = 2; page <= totalPages; page += 1) {
+          const nextPage = await getKnowledgeBasesPage(
+            page,
+            STATS_PAGE_SIZE,
+            normalized || undefined
+          );
+          if (statsRequestId.current !== requestId) return;
+          addRecords(nextPage.records || []);
+        }
+
+        if (statsRequestId.current !== requestId) return;
+        setStats({
+          totalCount,
+          documentCount: documentTotal,
+          activeCount: activeTotal,
+          creatorCount: creatorNames.size
+        });
+      } catch (error) {
+        if (statsRequestId.current !== requestId) return;
+        console.error(error);
+        setStats({
+          totalCount: 0,
+          documentCount: 0,
+          activeCount: 0,
+          creatorCount: 0
+        });
+      } finally {
+        if (statsRequestId.current === requestId) {
+          setStatsLoading(false);
+        }
       }
-    }
-  }, [keyword]);
+    },
+    [keyword]
+  );
 
   useEffect(() => {
     loadKnowledgeBases();
@@ -329,9 +355,7 @@ export function KnowledgeListPage() {
                         {kb.name}
                       </button>
                     </TableCell>
-                    <TableCell>
-                      {renderEmbeddingModel(kb.embeddingModel)}
-                    </TableCell>
+                    <TableCell>{renderEmbeddingModel(kb.embeddingModel)}</TableCell>
                     <TableCell>
                       {kb.collectionName ? (
                         <Badge
@@ -394,15 +418,28 @@ export function KnowledgeListPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground"
+            >
               删除
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={renameDialog.open} onOpenChange={(open) => setRenameDialog({ open, kb: open ? renameDialog.kb : null })}>
-        <DialogContent className="sm:max-w-[420px]" onOpenAutoFocus={(e) => e.preventDefault()} onCloseAutoFocus={(e) => { e.preventDefault(); requestAnimationFrame(() => (document.activeElement as HTMLElement)?.blur()); }}>
+      <Dialog
+        open={renameDialog.open}
+        onOpenChange={(open) => setRenameDialog({ open, kb: open ? renameDialog.kb : null })}
+      >
+        <DialogContent
+          className="sm:max-w-[420px]"
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          onCloseAutoFocus={(e) => {
+            e.preventDefault();
+            queueMicrotask(() => (document.activeElement as HTMLElement)?.blur());
+          }}
+        >
           <DialogHeader>
             <DialogTitle>重命名知识库</DialogTitle>
             <DialogDescription>修改知识库名称</DialogDescription>

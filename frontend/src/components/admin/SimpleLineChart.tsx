@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent
 } from "react";
 
@@ -40,17 +41,18 @@ interface SimpleLineChartProps {
   thresholds?: ChartThreshold[];
   theme?: "light" | "dark";
   yAxisTickCount?: number;
+  ariaLabel?: string;
 }
 
 const FALLBACK_TONES: ChartTone[] = ["primary", "success", "warning", "danger", "info", "neutral"];
 
 const CHART_COLOR_VARS: CSSProperties = {
-  ["--chart-primary" as string]: "#8b5cf6",
-  ["--chart-success" as string]: "#22c55e",
-  ["--chart-warning" as string]: "#f59e0b",
-  ["--chart-danger" as string]: "#ef4444",
-  ["--chart-info" as string]: "#06b6d4",
-  ["--chart-neutral" as string]: "#64748b"
+  ["--chart-primary" as string]: "var(--accent-primary)",
+  ["--chart-success" as string]: "var(--success)",
+  ["--chart-warning" as string]: "var(--warning)",
+  ["--chart-danger" as string]: "var(--error)",
+  ["--chart-info" as string]: "var(--accent-secondary)",
+  ["--chart-neutral" as string]: "var(--text-tertiary)"
 };
 
 const TONE_STROKE: Record<ChartTone, string> = {
@@ -64,28 +66,28 @@ const TONE_STROKE: Record<ChartTone, string> = {
 
 const CHART_THEME = {
   light: {
-    grid: "#f1f5f9",
-    axis: "#94a3b8",
-    label: "#64748b",
-    legend: "#475569",
-    hoverLine: "#94a3b8",
-    pointStroke: "#ffffff",
-    tooltipBg: "rgba(255,255,255,0.95)",
-    tooltipBorder: "#e2e8f0",
-    tooltipText: "#334155",
-    tooltipSecondary: "#64748b"
+    grid: "var(--border-light)",
+    axis: "var(--border-default)",
+    label: "var(--text-tertiary)",
+    legend: "var(--text-secondary)",
+    hoverLine: "var(--text-muted)",
+    pointStroke: "var(--bg-primary)",
+    tooltipBg: "var(--bg-primary)",
+    tooltipBorder: "var(--border-default)",
+    tooltipText: "var(--text-primary)",
+    tooltipSecondary: "var(--text-tertiary)"
   },
   dark: {
-    grid: "rgba(148,163,184,0.12)",
-    axis: "rgba(148,163,184,0.35)",
-    label: "#64748b",
-    legend: "#94a3b8",
-    hoverLine: "rgba(148,163,184,0.45)",
-    pointStroke: "#0f172a",
-    tooltipBg: "rgba(15,23,42,0.95)",
-    tooltipBorder: "rgba(71,85,105,0.65)",
-    tooltipText: "#e2e8f0",
-    tooltipSecondary: "#94a3b8"
+    grid: "var(--border-light)",
+    axis: "var(--border-default)",
+    label: "var(--text-tertiary)",
+    legend: "var(--text-secondary)",
+    hoverLine: "var(--text-muted)",
+    pointStroke: "var(--bg-primary)",
+    tooltipBg: "var(--bg-primary)",
+    tooltipBorder: "var(--border-default)",
+    tooltipText: "var(--text-primary)",
+    tooltipSecondary: "var(--text-tertiary)"
   }
 } as const;
 
@@ -199,7 +201,13 @@ const buildMonotonePath = (points: PlotPoint[]) => {
   for (let i = 1; i < points.length - 1; i += 1) {
     const prev = delta[i - 1];
     const next = delta[i];
-    if (!Number.isFinite(prev) || !Number.isFinite(next) || prev === 0 || next === 0 || prev * next < 0) {
+    if (
+      !Number.isFinite(prev) ||
+      !Number.isFinite(next) ||
+      prev === 0 ||
+      next === 0 ||
+      prev * next < 0
+    ) {
       slope[i] = 0;
       continue;
     }
@@ -237,9 +245,9 @@ const buildAreaPath = (points: PlotPoint[], baselineY: number) => {
 };
 
 const getThresholdToneColor = (tone?: ChartThreshold["tone"]) => {
-  if (tone === "critical") return "#ef4444";
-  if (tone === "warning") return "#f59e0b";
-  return "#0ea5e9";
+  if (tone === "critical") return "var(--error)";
+  if (tone === "warning") return "var(--warning)";
+  return "var(--accent-secondary)";
 };
 
 const buildYAxisTicks = (
@@ -250,8 +258,9 @@ const buildYAxisTicks = (
 ) => {
   if (yAxisType === "percent") {
     const step = 100 / Math.max(yAxisTickCount, 1);
-    return Array.from({ length: yAxisTickCount + 1 }, (_, index) =>
-      Math.round((100 - index * step) * 10) / 10
+    return Array.from(
+      { length: yAxisTickCount + 1 },
+      (_, index) => Math.round((100 - index * step) * 10) / 10
     );
   }
 
@@ -281,9 +290,11 @@ export function SimpleLineChart({
   xAxisMode = "date",
   thresholds = [],
   theme = "light",
-  yAxisTickCount = 4
+  yAxisTickCount = 4,
+  ariaLabel = "趋势图"
 }: SimpleLineChartProps) {
   const gradientIdPrefix = useId().replace(/:/g, "");
+  const titleId = `${gradientIdPrefix}-title`;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -309,7 +320,8 @@ export function SimpleLineChart({
   const normalizedSeries = useMemo(() => {
     return series.map((item, index) => ({
       ...item,
-      tone: item.tone || FALLBACK_TONES[index % FALLBACK_TONES.length]
+      tone: item.tone || FALLBACK_TONES[index % FALLBACK_TONES.length],
+      lineStyle: item.lineStyle || (index % 2 === 0 ? "solid" : "dashed")
     }));
   }, [series]);
 
@@ -332,8 +344,12 @@ export function SimpleLineChart({
   }, [normalizedSeries]);
 
   const values = useMemo(() => {
-    const lineValues = pointMaps.flatMap((map) => Array.from(map.values())).filter((value) => Number.isFinite(value));
-    const thresholdValues = thresholds.map((item) => item.value).filter((value) => Number.isFinite(value));
+    const lineValues = pointMaps
+      .flatMap((map) => Array.from(map.values()))
+      .filter((value) => Number.isFinite(value));
+    const thresholdValues = thresholds
+      .map((item) => item.value)
+      .filter((value) => Number.isFinite(value));
     return [...lineValues, ...thresholdValues];
   }, [pointMaps, thresholds]);
 
@@ -375,11 +391,15 @@ export function SimpleLineChart({
     ).size;
     return firstDate !== lastDate && uniqueClock <= 2;
   }, [xAxisMode, xValues]);
-  const noDataColor = theme === "dark" ? "#64748b" : "#94a3b8";
+  const noDataColor = "var(--text-tertiary)";
 
   if (!hasData) {
     return (
-      <div className="flex h-[180px] items-center justify-center text-sm" style={{ color: noDataColor }}>
+      <div
+        className="flex h-[180px] items-center justify-center text-sm"
+        style={{ color: noDataColor }}
+        role="status"
+      >
         暂无数据
       </div>
     );
@@ -432,6 +452,24 @@ export function SimpleLineChart({
     setHoverPosition(null);
   };
 
+  const showKeyboardPoint = (nextIndex: number) => {
+    const index = Math.max(0, Math.min(nextIndex, xValues.length - 1));
+    const ts = xValues[index];
+    const value = pointMaps.map((map) => map.get(ts)).find((item) => item !== undefined);
+    setHoverIndex(index);
+    setHoverPosition({
+      x: xAt(index),
+      y: value === undefined ? margin.top + innerHeight / 2 : yAt(value)
+    });
+  };
+
+  const onKeyDown = (event: ReactKeyboardEvent<SVGRectElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const currentIndex = hoverIndex ?? xValues.length - 1;
+    showKeyboardPoint(currentIndex + (event.key === "ArrowRight" ? 1 : -1));
+  };
+
   const tooltipWidth = 190;
   const tooltipLeft = hoverPosition
     ? Math.min(Math.max(8, hoverPosition.x + 12), outerWidth - tooltipWidth - 8)
@@ -467,8 +505,14 @@ export function SimpleLineChart({
       segments.push(currentSegment);
     }
 
-    const linePath = segments.map((segment) => buildMonotonePath(segment)).filter(Boolean).join(" ");
-    const areaPath = segments.map((segment) => buildAreaPath(segment, baselineY)).filter(Boolean).join(" ");
+    const linePath = segments
+      .map((segment) => buildMonotonePath(segment))
+      .filter(Boolean)
+      .join(" ");
+    const areaPath = segments
+      .map((segment) => buildAreaPath(segment, baselineY))
+      .filter(Boolean)
+      .join(" ");
     const lastSegment = segments[segments.length - 1];
     const endpoint = lastSegment ? lastSegment[lastSegment.length - 1] : null;
 
@@ -477,19 +521,33 @@ export function SimpleLineChart({
 
   return (
     <div ref={containerRef} className="relative w-full" style={CHART_COLOR_VARS}>
-      <div className="mb-2 flex flex-wrap items-center gap-3 text-xs" style={{ color: palette.legend }}>
+      <div
+        className="mb-2 flex flex-wrap items-center gap-3 text-xs"
+        style={{ color: palette.legend }}
+      >
         {normalizedSeries.map((item) => (
           <div key={item.name} className="inline-flex items-center gap-1.5">
             <span
-              className="h-2.5 w-2.5 rounded-full"
-              style={{ backgroundColor: TONE_STROKE[item.tone || "primary"] }}
+              className="inline-block w-5 border-t-2"
+              style={{
+                borderColor: TONE_STROKE[item.tone || "primary"],
+                borderTopStyle: item.lineStyle === "dashed" ? "dashed" : "solid"
+              }}
+              aria-hidden="true"
             />
             <span>{item.name}</span>
           </div>
         ))}
       </div>
 
-      <svg width={outerWidth} height={height} className="w-full overflow-visible">
+      <svg
+        width={outerWidth}
+        height={height}
+        className="w-full overflow-visible"
+        role="img"
+        aria-labelledby={titleId}
+      >
+        <title id={titleId}>{`${ariaLabel}，共 ${xValues.length} 个时间点`}</title>
         <defs>
           {normalizedSeries.map((item, index) => {
             const toneColor = TONE_STROKE[item.tone || "primary"];
@@ -638,19 +696,6 @@ export function SimpleLineChart({
 
         {normalizedSeries.map((item, index) => (
           <path
-            key={`${item.name}-glow`}
-            d={seriesGeometry[index].linePath}
-            fill="none"
-            stroke={TONE_STROKE[item.tone || "primary"]}
-            strokeWidth={2.2}
-            strokeOpacity={0.1}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-        ))}
-
-        {normalizedSeries.map((item, index) => (
-          <path
             key={item.name}
             d={seriesGeometry[index].linePath}
             fill="none"
@@ -715,6 +760,7 @@ export function SimpleLineChart({
         ) : null}
 
         <rect
+          className="dashboard-chart-hitarea"
           x={margin.left}
           y={margin.top}
           width={innerWidth}
@@ -722,6 +768,12 @@ export function SimpleLineChart({
           fill="transparent"
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
+          onFocus={() => showKeyboardPoint(xValues.length - 1)}
+          onBlur={onMouseLeave}
+          onKeyDown={onKeyDown}
+          tabIndex={0}
+          role="group"
+          aria-label={`${ariaLabel}数据点，可使用左右方向键浏览`}
         />
       </svg>
 
@@ -744,15 +796,24 @@ export function SimpleLineChart({
               const value = pointMaps[index].get(activeTs);
               return (
                 <div key={item.name} className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-1.5" style={{ color: palette.tooltipSecondary }}>
+                  <div
+                    className="flex items-center gap-1.5"
+                    style={{ color: palette.tooltipSecondary }}
+                  >
                     <span
-                      className="h-2 w-2 rounded-full"
-                      style={{ backgroundColor: TONE_STROKE[item.tone || "primary"] }}
+                      className="inline-block w-4 border-t-2"
+                      style={{
+                        borderColor: TONE_STROKE[item.tone || "primary"],
+                        borderTopStyle: item.lineStyle === "dashed" ? "dashed" : "solid"
+                      }}
+                      aria-hidden="true"
                     />
                     <span>{item.name}</span>
                   </div>
                   <span className="font-medium" style={{ color: palette.tooltipText }}>
-                    {value === undefined || value === null ? "-" : formatYAxisValue(value, yAxisType)}
+                    {value === undefined || value === null
+                      ? "-"
+                      : formatYAxisValue(value, yAxisType)}
                   </span>
                 </div>
               );
@@ -760,6 +821,40 @@ export function SimpleLineChart({
           </div>
         </div>
       ) : null}
+
+      <details className="dashboard-chart-data">
+        <summary>查看数据表</summary>
+        <div className="dashboard-chart-data-scroll">
+          <table>
+            <caption className="sr-only">{ariaLabel}数据表</caption>
+            <thead>
+              <tr>
+                <th scope="col">时间</th>
+                {normalizedSeries.map((item) => (
+                  <th key={item.name} scope="col">
+                    {item.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {xValues.map((ts) => (
+                <tr key={ts}>
+                  <th scope="row">{formatTooltipTime(ts, xAxisMode)}</th>
+                  {pointMaps.map((map, index) => {
+                    const value = map.get(ts);
+                    return (
+                      <td key={`${normalizedSeries[index].name}-${ts}`}>
+                        {value === undefined ? "-" : formatYAxisValue(value, yAxisType)}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 }

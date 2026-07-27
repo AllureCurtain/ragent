@@ -7,6 +7,9 @@ import { router } from "@/router";
 export default function App() {
   return (
     <ErrorBoundary>
+      <a className="skip-link" href="#main-content">
+        跳到主要内容
+      </a>
       <RouterProvider router={router} />
       <Toast />
     </ErrorBoundary>

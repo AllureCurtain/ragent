@@ -31,11 +31,11 @@ export function KnowledgeBaseMultiSelect({
 
   const selected = useMemo(() => new Set(value), [value]);
 
-  // 打开后聚焦搜索框，rAF 保证在 Radix 默认聚焦首个选项之后执行
+  // 打开后在 Radix 默认焦点处理完成后聚焦搜索框。
   useEffect(() => {
     if (!open) return;
-    const raf = requestAnimationFrame(() => searchRef.current?.focus());
-    return () => cancelAnimationFrame(raf);
+    const timer = window.setTimeout(() => searchRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   // 已选知识库按选择顺序保留，缺失的 collectionName 也占位展示
@@ -146,7 +146,8 @@ export function KnowledgeBaseMultiSelect({
         {knowledgeBases.length > 0 ? (
           <div className="flex items-center justify-between px-2.5 py-1.5 text-xs text-muted-foreground">
             <span>
-              已选 <span className="font-medium text-foreground">{value.length}</span> / {knowledgeBases.length}
+              已选 <span className="font-medium text-foreground">{value.length}</span> /{" "}
+              {knowledgeBases.length}
             </span>
             <div className="flex items-center gap-3">
               <button

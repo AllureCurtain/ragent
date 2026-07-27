@@ -2,6 +2,11 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Download } from "lucide-react";
 
 import { MarkdownRenderer } from "@/components/chat/MarkdownRenderer";
+import {
+  isImageType,
+  isSpreadsheetType,
+  parseFrontMatter
+} from "@/components/document/documentPreviewUtils";
 import { csvToMarkdown } from "@/lib/csvToMarkdown";
 import { fetchDocumentFile, previewDocument } from "@/services/knowledgeService";
 
@@ -12,26 +17,6 @@ const SpreadsheetPreview = lazy(() =>
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
-const IMAGE_EXTS = ["png", "jpg", "jpeg", "svg", "gif", "webp", "bmp"];
-
-export const isSpreadsheetType = (ext?: string | null) => {
-  const e = (ext || "").toLowerCase();
-  return e === "xlsx" || e === "xls";
-};
-
-export const isImageType = (ext?: string | null) => IMAGE_EXTS.includes((ext || "").toLowerCase());
-
-// 剥离 markdown 头部的 front-matter，单独展示
-export const parseFrontMatter = (content: string): { head: string | null; body: string } => {
-  if (content.startsWith("---\n")) {
-    const end = content.indexOf("\n---\n", 4);
-    if (end > 0) {
-      return { head: content.substring(4, end), body: content.substring(end + 5) };
-    }
-  }
-  return { head: null, body: content };
-};
-
 interface DocumentPreviewProps {
   docId: string;
   fileType?: string | null;
@@ -40,7 +25,9 @@ interface DocumentPreviewProps {
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-1 items-center justify-center py-16 text-sm text-muted-foreground">{children}</div>
+    <div className="flex flex-1 items-center justify-center py-16 text-sm text-muted-foreground">
+      {children}
+    </div>
   );
 }
 
@@ -64,7 +51,7 @@ function DownloadFallback({ docId, docName, fileType }: DocumentPreviewProps) {
       <button
         type="button"
         onClick={handleDownload}
-        className="inline-flex items-center gap-1.5 rounded-full border border-[#EAEAEA] bg-[#F7F7F8] px-3 py-1.5 text-[#666666] transition-colors hover:border-[#DCDCDC] hover:bg-[#F0F0F1] hover:text-[#1A1A1A]"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-3 py-1.5 text-muted-foreground transition-colors hover:border-primary/20 hover:bg-accent hover:text-foreground"
       >
         <Download className="h-3.5 w-3.5" />
         下载原文件
@@ -130,7 +117,7 @@ export function DocumentPreview({ docId, fileType, docName }: DocumentPreviewPro
   }
   if (isImage) {
     return (
-      <div className="flex flex-1 items-center justify-center overflow-auto bg-[#F7F7F8] p-4">
+      <div className="flex flex-1 items-center justify-center overflow-auto bg-muted/60 p-4">
         <img className="max-h-full max-w-full object-contain" src={fileUrl} alt={docName || ""} />
       </div>
     );

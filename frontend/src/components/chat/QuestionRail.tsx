@@ -33,9 +33,9 @@ export function QuestionRail({ items, activeId, onSelect }: QuestionRailProps) {
     >
       <div
         className={cn(
-          "transition-all duration-200 ease-out",
+          "transition-[width,background-color,border-color,box-shadow] duration-200",
           expanded
-            ? "w-[260px] rounded-2xl border border-[#E5E5E5] bg-white px-1.5 py-2 shadow-lg"
+            ? "w-[260px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-1.5 py-2 shadow-[var(--shadow-lg)]"
             : "w-[28px] bg-transparent"
         )}
       >
@@ -59,7 +59,7 @@ export function QuestionRail({ items, activeId, onSelect }: QuestionRailProps) {
                   className={cn(
                     "flex w-full items-center transition-colors",
                     expanded
-                      ? "gap-3 rounded-md px-3 py-1.5 hover:bg-[#F5F5F5]"
+                      ? "gap-3 rounded-lg px-3 py-2 hover:bg-[var(--bg-hover)]"
                       : "justify-end"
                   )}
                   aria-label={item.text}
@@ -69,8 +69,8 @@ export function QuestionRail({ items, activeId, onSelect }: QuestionRailProps) {
                       className={cn(
                         "flex-1 truncate text-left text-[13px] transition-colors",
                         isActive
-                          ? "font-medium text-[#3B82F6]"
-                          : "text-[#666666]"
+                          ? "font-semibold text-[var(--accent-primary)]"
+                          : "text-[var(--text-secondary)]"
                       )}
                     >
                       {item.text}
@@ -79,8 +79,10 @@ export function QuestionRail({ items, activeId, onSelect }: QuestionRailProps) {
                   <span
                     aria-hidden="true"
                     className={cn(
-                      "inline-block w-[14px] shrink-0 rounded-full transition-all",
-                      isActive ? "h-[3px] bg-[#2563EB]" : "h-[1.5px] bg-[#D4D4D4]"
+                      "inline-block w-[14px] shrink-0 rounded-full transition-[height,background-color]",
+                      isActive
+                        ? "h-[3px] bg-[var(--accent-primary)]"
+                        : "h-[1.5px] bg-[var(--border-focus)]"
                     )}
                   />
                 </button>

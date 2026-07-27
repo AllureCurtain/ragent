@@ -47,13 +47,15 @@ export type DashboardTrends = {
   series: DashboardTrendSeries[];
 };
 
-export async function getDashboardOverview(window: string = "24h"): Promise<DashboardOverview> {
+export async function getDashboardOverview(window: string = "7d"): Promise<DashboardOverview> {
   return api.get<DashboardOverview, DashboardOverview>("/admin/dashboard/overview", {
     params: { window }
   });
 }
 
-export async function getDashboardPerformance(window: string = "24h"): Promise<DashboardPerformance> {
+export async function getDashboardPerformance(
+  window: string = "7d"
+): Promise<DashboardPerformance> {
   return api.get<DashboardPerformance, DashboardPerformance>("/admin/dashboard/performance", {
     params: { window }
   });

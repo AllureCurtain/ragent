@@ -126,156 +126,118 @@ export function WelcomeScreen() {
   const hasContent = value.trim().length > 0;
 
   return (
-    <div className="relative flex min-h-full items-center justify-center overflow-hidden px-4 py-16 sm:px-6">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-gradient-to-br from-[#F8FAFC] via-white to-[#EFF6FF]"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-grid-pattern opacity-40 [background-size:40px_40px]"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -top-32 right-[-40px] h-72 w-72 rounded-full bg-gradient-radial from-[#BFDBFE]/60 via-transparent to-transparent blur-3xl animate-float"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -bottom-36 left-[-80px] h-80 w-80 rounded-full bg-gradient-radial from-[#FDE68A]/40 via-transparent to-transparent blur-3xl animate-float"
-      />
-
-      <div className="relative w-full max-w-[860px]">
+    <div className="flex min-h-full items-center justify-center bg-[var(--bg-primary)] px-4 py-10 sm:px-6 sm:py-14">
+      <div className="w-full max-w-[880px]">
         <div
           className="text-center opacity-0 animate-fade-up"
           style={{ animationFillMode: "both" }}
         >
-          <span className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-medium text-[#2563EB] shadow-sm">
-            <Bot className="h-3.5 w-3.5" />
-            RAG 智能问答
+          <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-[12px] bg-[var(--accent-primary)] text-[var(--text-on-accent)] shadow-[var(--shadow-md)]">
+            <Bot className="h-5 w-5" />
           </span>
-          <h1 className="mt-4 font-display text-4xl leading-tight tracking-tight text-[#111827] sm:text-5xl md:text-6xl">
-            把问题变成
-            <span className="text-gradient">清晰答案</span>
+          <h1 className="mt-5 text-balance font-display text-2xl font-bold leading-tight text-[var(--text-primary)] sm:text-[28px]">
+            今天想从知识库中查什么？
           </h1>
-          <p className="mt-4 text-base text-[#4B5563] sm:text-lg">
-            结构化提问、知识检索与深度思考，一次对话给出可执行方案
+          <p className="mx-auto mt-2 max-w-xl text-pretty text-sm leading-6 text-[var(--text-tertiary)]">
+            NexusQA 会结合检索结果组织回答，并保留可核验的文档来源。
           </p>
         </div>
 
         <div
-          className="mt-10 opacity-0 animate-fade-up"
+          className="mt-8 opacity-0 animate-fade-up"
           style={{ animationDelay: "80ms", animationFillMode: "both" }}
         >
           <div
             className={cn(
-              "relative flex flex-col rounded-3xl border border-white/70 bg-white/80 px-5 pt-4 pb-3 shadow-soft backdrop-blur-xl transition-all duration-200",
+              "relative flex flex-col rounded-[16px] border bg-[var(--bg-primary)] px-4 pb-3 pt-3 shadow-[var(--shadow-lg)] transition-[border-color,box-shadow] duration-200",
               isFocused
-                ? "border-[#BFDBFE] shadow-glow"
-                : "hover:border-[#D4D4D4]"
+                ? "border-[var(--border-focus)] shadow-[0_0_0_3px_var(--accent-light),var(--shadow-lg)]"
+                : "border-[var(--border-default)] hover:border-[var(--border-focus)]"
             )}
           >
-            <div className="relative">
-              <textarea
-                ref={textareaRef}
-                value={value}
-                onChange={(event) => setValue(event.target.value)}
-                placeholder={deepThinkingEnabled ? "输入需要深度分析的问题..." : "输入你的问题..."}
-                className="max-h-40 min-h-[52px] w-full resize-none border-0 bg-transparent px-2 pt-2 pb-2 text-[15px] text-[#1F2937] placeholder:text-[#9CA3AF] focus:outline-none sm:text-base"
-                rows={1}
-                onFocus={() => setIsFocused(true)}
-                onBlur={() => setIsFocused(false)}
-                onCompositionStart={() => {
-                  isComposingRef.current = true;
-                }}
-                onCompositionEnd={() => {
-                  isComposingRef.current = false;
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    const nativeEvent = event.nativeEvent as KeyboardEvent;
-                    if (nativeEvent.isComposing || isComposingRef.current || nativeEvent.keyCode === 229) {
-                      return;
-                    }
-                    event.preventDefault();
-                    handleSubmit();
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              placeholder={deepThinkingEnabled ? "输入需要完整分析的问题" : "输入问题"}
+              className="max-h-40 min-h-[64px] w-full resize-none border-0 bg-transparent px-1.5 py-1.5 text-[15px] leading-6 text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none sm:text-base"
+              rows={1}
+              onFocus={() => setIsFocused(true)}
+              onBlur={() => setIsFocused(false)}
+              onCompositionStart={() => {
+                isComposingRef.current = true;
+              }}
+              onCompositionEnd={() => {
+                isComposingRef.current = false;
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  const nativeEvent = event.nativeEvent as KeyboardEvent;
+                  if (nativeEvent.isComposing || isComposingRef.current || nativeEvent.keyCode === 229) {
+                    return;
                   }
-                }}
-                aria-label="发送消息"
-              />
-              <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-[10px] bg-gradient-to-b from-white/0 via-white/40 to-white/90" />
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
+                  event.preventDefault();
+                  handleSubmit();
+                }
+              }}
+              aria-label="发送消息"
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--border-light)] pt-2">
               <button
                 type="button"
                 onClick={() => setDeepThinkingEnabled(!deepThinkingEnabled)}
                 disabled={isStreaming}
                 aria-pressed={deepThinkingEnabled}
                 className={cn(
-                  "rounded-full border px-3 py-1.5 text-xs font-medium transition-all",
+                  "inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors",
                   deepThinkingEnabled
-                    ? "border-[#BFDBFE] bg-[#DBEAFE] text-[#2563EB]"
-                    : "border-transparent bg-[#F5F5F5] text-[#6B7280] hover:bg-[#EEEEEE]",
+                    ? "border-[var(--border-accent)] bg-[var(--accent-light)] text-[var(--accent-primary)]"
+                    : "border-transparent bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]",
                   isStreaming && "cursor-not-allowed opacity-60"
                 )}
               >
-                <span className="inline-flex items-center gap-2">
-                  <Brain className={cn("h-3.5 w-3.5", deepThinkingEnabled && "text-[#3B82F6]")} />
-                  深度思考
-                  {deepThinkingEnabled ? (
-                    <span className="h-2 w-2 rounded-full bg-[#3B82F6] animate-pulse" />
-                  ) : null}
-                </span>
+                <Brain className="h-3.5 w-3.5" />
+                深度思考
               </button>
+              {deepThinkingEnabled ? (
+                <span className="hidden text-[11px] text-[var(--text-tertiary)] sm:inline">
+                  将执行更完整的分析链路
+                </span>
+              ) : null}
               <button
                 type="button"
                 onClick={handleSubmit}
                 disabled={!hasContent && !isStreaming}
                 aria-label={isStreaming ? "停止生成" : "发送消息"}
                 className={cn(
-                  "ml-auto inline-flex items-center justify-center rounded-full p-2.5 transition-all duration-200",
+                  "ml-auto inline-flex h-9 w-9 items-center justify-center rounded-[10px] transition-colors duration-200",
                   isStreaming
-                    ? "bg-[#FEE2E2] text-[#EF4444] hover:bg-[#FECACA]"
+                    ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
                     : hasContent
-                      ? "bg-[#3B82F6] text-white hover:bg-[#2563EB]"
-                      : "cursor-not-allowed bg-[#F5F5F5] text-[#CCCCCC]"
+                      ? "bg-[var(--accent-primary)] text-[var(--text-on-accent)] hover:bg-[var(--accent-hover)]"
+                      : "cursor-not-allowed bg-[var(--bg-tertiary)] text-[var(--text-muted)]"
                 )}
               >
                 {isStreaming ? <Square className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               </button>
             </div>
           </div>
-          {deepThinkingEnabled ? (
-            <p className="mt-3 text-xs text-[#2563EB]">
-              <span className="inline-flex items-center gap-1.5">
-                <Lightbulb className="h-3.5 w-3.5" />
-                深度思考模式已开启，AI将进行更深入的分析推理
-              </span>
+          {isStreaming ? (
+            <p className="mt-2 text-center text-[11px] text-[var(--text-tertiary)]" aria-live="polite">
+              正在生成回答，可随时停止
             </p>
           ) : null}
-          <p className="mt-3 text-center text-xs text-[#94A3B8]">
-            <kbd className="rounded bg-white/80 px-1.5 py-0.5 text-[#6B7280] shadow-sm">
-              Enter
-            </kbd>{" "}
-            发送
-            <span className="px-1.5">·</span>
-            <kbd className="rounded bg-white/80 px-1.5 py-0.5 text-[#6B7280] shadow-sm">
-              Shift + Enter
-            </kbd>{" "}
-            换行
-            {isStreaming ? <span className="ml-2 animate-pulse-soft">生成中...</span> : null}
-          </p>
         </div>
 
         <div
-          className="mt-10 opacity-0 animate-fade-up"
+          className="mt-8 opacity-0 animate-fade-up"
           style={{ animationDelay: "160ms", animationFillMode: "both" }}
         >
-          <div className="flex items-center justify-center gap-2 text-xs uppercase tracking-[0.24em] text-[#94A3B8]">
-            <span className="h-px w-8 bg-[#E5E7EB]" />
-            试试这些开场
-            <span className="h-px w-8 bg-[#E5E7EB]" />
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-[var(--text-secondary)]">推荐问题</p>
+            <p className="text-[11px] text-[var(--text-tertiary)]">选择后可继续编辑</p>
           </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
             {promptPresets.map((preset) => {
               const Icon = preset.icon;
               return (
@@ -285,22 +247,22 @@ export function WelcomeScreen() {
                   onClick={() => applyPreset(preset.prompt)}
                   disabled={isStreaming}
                   className={cn(
-                    "group rounded-2xl border border-white/70 bg-white/70 p-4 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-[#BFDBFE] hover:shadow-md",
+                    "group flex min-h-[108px] flex-col rounded-[12px] border border-[var(--border-default)] bg-[var(--surface-elevated)] p-3.5 text-left shadow-[var(--shadow-xs)] transition-[border-color,background-color,box-shadow] duration-200 hover:border-[var(--border-accent)] hover:bg-[var(--bg-primary)] hover:shadow-[var(--shadow-md)]",
                     isStreaming && "cursor-not-allowed opacity-60"
                   )}
                 >
                   <div className="flex items-center gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#EFF6FF] text-[#2563EB]">
+                    <span className="flex h-8 w-8 items-center justify-center rounded-[9px] bg-[var(--accent-light)] text-[var(--accent-primary)]">
                       <Icon className="h-4 w-4" />
                     </span>
-                    <div>
-                      <p className="text-sm font-semibold text-[#1F2937]">{preset.title}</p>
-                      <p className="text-xs text-[#6B7280]">{preset.description}</p>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[var(--text-primary)]">{preset.title}</p>
+                      <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-[var(--text-tertiary)]">{preset.description}</p>
                     </div>
                   </div>
-                  <div className="mt-3 flex items-center gap-2 text-xs text-[#94A3B8]">
-                    <span className="min-w-0 flex-1 truncate">推荐问法：{preset.prompt}</span>
-                    <ArrowUpRight className="h-3.5 w-3.5 text-[#CBD5F5] transition-colors group-hover:text-[#3B82F6]" />
+                  <div className="mt-auto flex items-center gap-2 pt-3 text-[11px] text-[var(--text-muted)]">
+                    <span className="min-w-0 flex-1 truncate">{preset.prompt}</span>
+                    <ArrowUpRight className="h-3.5 w-3.5 text-[var(--text-muted)] transition-colors group-hover:text-[var(--accent-primary)]" />
                   </div>
                 </button>
               );
