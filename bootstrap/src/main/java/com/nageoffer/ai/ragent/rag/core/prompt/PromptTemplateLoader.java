@@ -119,7 +119,8 @@ public class PromptTemplateLoader {
             throw new IllegalStateException("提示词模板路径不存在：" + path);
         }
         try (InputStream in = resource.getInputStream()) {
-            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            String content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            return content.replace("\r\n", "\n").replace('\r', '\n');
         } catch (IOException e) {
             log.error("读取提示模板失败，路径：{}", path, e);
             throw new IllegalStateException("读取提示模板失败，路径：" + path, e);
