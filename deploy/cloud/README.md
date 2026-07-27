@@ -1,5 +1,8 @@
 # Ragent cloud deployment
 
+For the repeatable NexusQA upgrade, verification, and rollback procedure, see
+[`RELEASE_WORKFLOW.zh-CN.md`](./RELEASE_WORKFLOW.zh-CN.md).
+
 This deployment packages the Ragent backend, MCP server, and frontend gateway. It reuses the
 PostgreSQL/pgvector, RustFS, and RocketMQ containers already running on the cloud server. The
 optional `compose.infra.yaml` overlay starts only Redis, which is not currently installed there.
