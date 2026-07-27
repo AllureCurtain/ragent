@@ -61,50 +61,58 @@ export function SourcesPanel() {
   return (
     <aside
       className={cn(
-        "h-full shrink-0 overflow-hidden transition-[width] duration-300 ease-out",
-        open ? "w-[380px] border-l border-[#EFEFEF]" : "w-0"
+        "fixed bottom-0 right-0 top-[60px] z-30 h-auto w-[min(380px,100vw)] shrink-0 overflow-hidden border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[var(--shadow-xl)] transition-transform duration-300 xl:static xl:h-full xl:shadow-none xl:transition-[width]",
+        open
+          ? "translate-x-0 xl:w-[360px] xl:translate-x-0"
+          : "pointer-events-none translate-x-full xl:w-0 xl:translate-x-0"
       )}
       aria-hidden={!open}
     >
-      <div className="flex h-full w-[380px] flex-col bg-white">
-        <div className="flex items-center justify-between border-b border-[#F0F0F0] px-5 py-4">
-          <span className="text-[15px] font-semibold text-[#1A1A1A]">参考来源 ({shownSources.length})</span>
+      <div className="flex h-full w-[min(380px,100vw)] flex-col bg-[var(--bg-primary)] xl:w-[360px]">
+        <div className="flex h-[60px] items-center justify-between border-b border-[var(--border-light)] px-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-[var(--text-primary)]">参考来源</span>
+            <span className="rounded-md bg-[var(--accent-light)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--accent-primary)]">
+              {shownSources.length}
+            </span>
+          </div>
           <button
             type="button"
             onClick={closeSourcesPanel}
-            className="rounded-full p-1.5 text-[#999999] transition-colors hover:bg-[#F5F5F5] hover:text-[#666666]"
-            aria-label="关闭"
+            className="flex h-9 w-9 items-center justify-center rounded-[10px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            aria-label="关闭参考来源"
+            title="关闭参考来源"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-3 py-3 sidebar-scroll">
-          <ul className="space-y-1">
+        <div className="flex-1 overflow-y-auto p-3 sidebar-scroll">
+          <ul className="space-y-2">
             {shownSources.map((source, idx) => (
               <li key={`${source.docId}-${idx}`}>
                 <button
                   type="button"
                   onClick={() => openSource(source)}
                   title={source.docName || "查看来源"}
-                  className="w-full rounded-xl p-3 text-left transition-all hover:bg-white hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
+                  className="w-full rounded-[10px] border border-transparent bg-[var(--bg-tertiary)] p-3 text-left transition-[border-color,background-color,box-shadow] hover:border-[var(--border-accent)] hover:bg-[var(--bg-primary)] hover:shadow-[var(--shadow-md)]"
                 >
                   <div className="flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[#EDEDED] text-[11px] font-medium text-[#666666]">
+                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[var(--accent-light)] text-[11px] font-semibold text-[var(--accent-primary)]">
                       {source.index ?? idx + 1}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-[#1A1A1A]">
+                      <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
                         {source.docName || "未命名文档"}
                       </div>
-                      <div className="mt-1 flex items-center gap-1.5 text-xs text-[#9AA0A6]">
+                      <div className="mt-1 flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
                         <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                           <SourceIcon source={source} className="h-3.5 w-3.5" />
                         </span>
                         <span className="truncate">{metaLabel(source)}</span>
                       </div>
                       {source.excerpt ? (
-                        <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[#8A8F94]">
+                        <p className="mt-2 line-clamp-3 text-xs leading-5 text-[var(--text-tertiary)]">
                           {source.excerpt}
                         </p>
                       ) : null}

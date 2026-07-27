@@ -156,10 +156,10 @@ const resolveKindBadge = (value: number) => {
 };
 
 const resolveLevelBadgeClass = (value: number) => {
-  if (value === 0) return "border-[#91d5ff] bg-[#e6f7ff] text-[#1890FF]";
-  if (value === 1) return "border-[#b7eb8f] bg-[#f6ffed] text-[#52C41A]";
-  if (value === 2) return "border-[#ffd591] bg-[#fff7e6] text-[#FA8C16]";
-  return "border-slate-200 bg-slate-50 text-slate-600";
+  if (value === 0) return "admin-badge--accent";
+  if (value === 1) return "admin-badge--neutral";
+  if (value === 2) return "admin-badge--secondary";
+  return "admin-badge--neutral";
 };
 
 export function IntentListPage() {
@@ -175,7 +175,9 @@ export function IntentListPage() {
   const [pageNo, setPageNo] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [batchSubmitting, setBatchSubmitting] = useState<null | "enable" | "disable" | "delete">(null);
+  const [batchSubmitting, setBatchSubmitting] = useState<null | "enable" | "disable" | "delete">(
+    null
+  );
   const [knowledgeBaseNameMap, setKnowledgeBaseNameMap] = useState<Map<string, string>>(new Map());
 
   const loadIntentTree = async () => {
@@ -194,7 +196,9 @@ export function IntentListPage() {
   useEffect(() => {
     loadIntentTree();
     getKnowledgeBases()
-      .then((data) => setKnowledgeBaseNameMap(new Map(data.map((kb) => [kb.collectionName, kb.name]))))
+      .then((data) =>
+        setKnowledgeBaseNameMap(new Map(data.map((kb) => [kb.collectionName, kb.name])))
+      )
       .catch((error) => console.error(error));
   }, []);
 
@@ -258,12 +262,13 @@ export function IntentListPage() {
   const startIndex = (currentPage - 1) * pageSize;
   const pageRows = filteredRows.slice(startIndex, startIndex + pageSize);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const selectedRows = useMemo(() => rows.filter((row) => selectedIdSet.has(row.id)), [rows, selectedIdSet]);
+  const selectedRows = useMemo(
+    () => rows.filter((row) => selectedIdSet.has(row.id)),
+    [rows, selectedIdSet]
+  );
   const pageRowIds = useMemo(() => pageRows.map((row) => row.id), [pageRows]);
-  const allPageSelected =
-    pageRowIds.length > 0 && pageRowIds.every((id) => selectedIdSet.has(id));
-  const somePageSelected =
-    !allPageSelected && pageRowIds.some((id) => selectedIdSet.has(id));
+  const allPageSelected = pageRowIds.length > 0 && pageRowIds.every((id) => selectedIdSet.has(id));
+  const somePageSelected = !allPageSelected && pageRowIds.some((id) => selectedIdSet.has(id));
 
   useEffect(() => {
     if (pageNo !== currentPage) {
@@ -345,13 +350,19 @@ export function IntentListPage() {
   };
 
   const resolveCollections = (row: FlatIntentNode) =>
-    row.collectionNames?.length ? row.collectionNames : row.collectionName ? [row.collectionName] : [];
+    row.collectionNames?.length
+      ? row.collectionNames
+      : row.collectionName
+        ? [row.collectionName]
+        : [];
 
   const resolveResourceText = (row: FlatIntentNode) => {
     if (row.kind === 0) {
-      return resolveCollections(row)
-        .map((collectionName) => knowledgeBaseNameMap.get(collectionName) || collectionName)
-        .join("、") || "-";
+      return (
+        resolveCollections(row)
+          .map((collectionName) => knowledgeBaseNameMap.get(collectionName) || collectionName)
+          .join("、") || "-"
+      );
     }
     if (row.kind === 2) {
       return row.mcpToolId || "-";
@@ -398,7 +409,10 @@ export function IntentListPage() {
                   setPageNo(1);
                 }}
               >
-                <SelectTrigger aria-label="层级筛选" className={cn("w-[136px]", FILTER_SELECT_TRIGGER_CLASS)}>
+                <SelectTrigger
+                  aria-label="层级筛选"
+                  className={cn("w-[136px]", FILTER_SELECT_TRIGGER_CLASS)}
+                >
                   <SelectValue placeholder="层级" />
                 </SelectTrigger>
                 <SelectContent>
@@ -418,7 +432,10 @@ export function IntentListPage() {
                   setPageNo(1);
                 }}
               >
-                <SelectTrigger aria-label="类型筛选" className={cn("w-[136px]", FILTER_SELECT_TRIGGER_CLASS)}>
+                <SelectTrigger
+                  aria-label="类型筛选"
+                  className={cn("w-[136px]", FILTER_SELECT_TRIGGER_CLASS)}
+                >
                   <SelectValue placeholder="类型" />
                 </SelectTrigger>
                 <SelectContent>
@@ -438,7 +455,10 @@ export function IntentListPage() {
                   setPageNo(1);
                 }}
               >
-                <SelectTrigger aria-label="状态筛选" className={cn("w-[136px]", FILTER_SELECT_TRIGGER_CLASS)}>
+                <SelectTrigger
+                  aria-label="状态筛选"
+                  className={cn("w-[136px]", FILTER_SELECT_TRIGGER_CLASS)}
+                >
                   <SelectValue placeholder="状态" />
                 </SelectTrigger>
                 <SelectContent>
@@ -455,7 +475,10 @@ export function IntentListPage() {
                   setPageNo(1);
                 }}
               >
-                <SelectTrigger aria-label="父节点筛选" className={cn("w-[220px]", FILTER_SELECT_TRIGGER_CLASS)}>
+                <SelectTrigger
+                  aria-label="父节点筛选"
+                  className={cn("w-[220px]", FILTER_SELECT_TRIGGER_CLASS)}
+                >
                   <SelectValue placeholder="父节点" />
                 </SelectTrigger>
                 <SelectContent className="max-h-[22rem]">
@@ -499,7 +522,9 @@ export function IntentListPage() {
           {selectedRows.length > 0 ? (
             <div className="-mx-6">
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-none border-y border-slate-200/80 bg-slate-50 px-6 py-2">
-                <span className="text-sm font-medium text-slate-700">已选 {selectedRows.length} 项</span>
+                <span className="text-sm font-medium text-slate-700">
+                  已选 {selectedRows.length} 项
+                </span>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     size="sm"
@@ -580,17 +605,14 @@ export function IntentListPage() {
                   <TableHead className="w-[220px]">关联资源</TableHead>
                   <TableHead className="w-[90px]">示例数</TableHead>
                   <TableHead className="w-[90px]">状态</TableHead>
-                  <TableHead className="sticky right-0 z-20 w-[180px] bg-[#F9FAFB] text-left shadow-[-1px_0_0_rgba(226,232,240,1)]">
+                  <TableHead className="sticky right-0 z-20 w-[180px] border-l border-border bg-muted text-left shadow-none">
                     操作
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pageRows.map((row) => (
-                  <TableRow
-                    key={row.id}
-                    className="group text-[13px] hover:!bg-slate-50"
-                  >
+                  <TableRow key={row.id} className="group text-[13px] hover:!bg-slate-50">
                     <TableCell>
                       <Checkbox
                         checked={selectedIdSet.has(row.id)}
@@ -610,7 +632,10 @@ export function IntentListPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline" className={cn("font-medium", resolveLevelBadgeClass(row.level))}>
+                      <Badge
+                        variant="outline"
+                        className={cn("font-medium", resolveLevelBadgeClass(row.level))}
+                      >
                         {resolveLevelLabel(row.level)}
                       </Badge>
                     </TableCell>
@@ -622,7 +647,10 @@ export function IntentListPage() {
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1">
                         {row.pathNames.map((segment, index) => (
-                          <span key={`${row.id}-${segment}-${index}`} className="inline-flex items-center gap-1">
+                          <span
+                            key={`${row.id}-${segment}-${index}`}
+                            className="inline-flex items-center gap-1"
+                          >
                             {index > 0 ? <span className="text-slate-300">/</span> : null}
                             <button
                               type="button"
@@ -689,18 +717,12 @@ export function IntentListPage() {
                     <TableCell>
                       <Badge
                         variant={row.enabled === 0 ? "secondary" : "default"}
-                        className={cn(
-                          row.enabled === 0
-                            ? "border-[#d9d9d9] bg-[#fafafa] text-[#8c8c8c] font-semibold"
-                            : "border-[#b7eb8f] bg-[#f6ffed] text-[#52C41A] font-semibold"
-                        )}
+                        className="font-semibold"
                       >
                         {row.enabled === 0 ? "禁用" : "启用"}
                       </Badge>
                     </TableCell>
-                    <TableCell
-                      className="sticky right-0 z-10 bg-white shadow-[-1px_0_0_rgba(226,232,240,1)] group-hover:bg-slate-50"
-                    >
+                    <TableCell className="sticky right-0 z-10 border-l border-border bg-card shadow-none group-hover:bg-muted">
                       <div className="flex items-center gap-2">
                         <Button
                           size="sm"

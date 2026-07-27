@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { AlertCircle, LoaderCircle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -22,9 +24,9 @@ const BoolBadge = ({ value }: { value: boolean }) => (
 
 function InfoItem({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="flex flex-col gap-1 rounded-lg border border-slate-200/70 bg-white px-4 py-3">
-      <span className="text-xs text-slate-500">{label}</span>
-      <div className="text-sm font-medium text-slate-800">{value}</div>
+    <div className="settings-info-item">
+      <span>{label}</span>
+      <div>{value}</div>
     </div>
   );
 }
@@ -32,14 +34,18 @@ function InfoItem({ label, value }: { label: string; value: ReactNode }) {
 export function SystemSettingsPage() {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const loadSettings = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await getSystemSettings();
       setSettings(data);
     } catch (error) {
-      toast.error(getErrorMessage(error, "加载系统配置失败"));
+      const message = getErrorMessage(error, "加载系统配置失败");
+      setError(message);
+      toast.error(message);
       console.error(error);
     } finally {
       setLoading(false);
@@ -52,16 +58,30 @@ export function SystemSettingsPage() {
 
   if (loading) {
     return (
-      <div className="admin-page">
-        <div className="text-sm text-muted-foreground">加载中...</div>
+      <div className="admin-page settings-state" role="status">
+        <LoaderCircle className="h-5 w-5 animate-spin" aria-hidden="true" />
+        <div>
+          <p className="font-semibold text-[var(--text-primary)]">正在读取系统配置</p>
+          <p className="mt-1 text-sm text-muted-foreground">正在汇总 RAG 与模型路由参数。</p>
+        </div>
       </div>
     );
   }
 
-  if (!settings) {
+  if (error || !settings) {
     return (
-      <div className="admin-page">
-        <div className="text-sm text-muted-foreground">暂无可展示的配置</div>
+      <div className="admin-page settings-state" role="alert">
+        <AlertCircle className="h-5 w-5 text-[var(--error)]" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold text-[var(--text-primary)]">无法读取系统配置</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {error || "当前环境没有可展示的配置。"}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => void loadSettings()}>
+          <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+          重试
+        </Button>
       </div>
     );
   }
@@ -74,8 +94,11 @@ export function SystemSettingsPage() {
       <div className="admin-page-header">
         <div>
           <h1 className="admin-page-title">系统配置</h1>
-          <p className="admin-page-subtitle">只读展示当前 application 配置</p>
+          <p className="admin-page-subtitle">核对当前生效的 RAG、模型路由与流式响应参数</p>
         </div>
+        <Badge variant="outline" className="self-start">
+          只读
+        </Badge>
       </div>
 
       <Card>
@@ -83,7 +106,7 @@ export function SystemSettingsPage() {
           <CardTitle>RAG 默认配置</CardTitle>
           <CardDescription>向量空间与检索基础参数</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="settings-info-grid">
           <InfoItem label="Collection" value={rag.default.collectionName} />
           <InfoItem label="Dimension" value={rag.default.dimension} />
           <InfoItem label="Metric Type" value={rag.default.metricType} />
@@ -95,7 +118,7 @@ export function SystemSettingsPage() {
           <CardTitle>查询改写</CardTitle>
           <CardDescription>历史上下文压缩与改写策略</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="settings-info-grid">
           <InfoItem label="Enabled" value={<BoolBadge value={rag.queryRewrite.enabled} />} />
         </CardContent>
       </Card>
@@ -105,7 +128,7 @@ export function SystemSettingsPage() {
           <CardTitle>全局限流</CardTitle>
           <CardDescription>并发与租约控制</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="settings-info-grid">
           <InfoItem label="Enabled" value={<BoolBadge value={rag.rateLimit.global.enabled} />} />
           <InfoItem label="Max Concurrent" value={rag.rateLimit.global.maxConcurrent} />
           <InfoItem label="Max Wait Seconds" value={rag.rateLimit.global.maxWaitSeconds} />
@@ -119,7 +142,7 @@ export function SystemSettingsPage() {
           <CardTitle>记忆管理</CardTitle>
           <CardDescription>摘要与上下文保留策略</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
+        <CardContent className="settings-info-grid">
           <InfoItem label="History Keep Turns" value={rag.memory.historyKeepTurns} />
           <InfoItem label="Summary Start Turns" value={rag.memory.summaryStartTurns} />
           <InfoItem
@@ -151,7 +174,11 @@ export function SystemSettingsPage() {
                 <TableRow key={name}>
                   <TableCell className="font-medium">{name}</TableCell>
                   <TableCell>{provider.url}</TableCell>
-                  <TableCell>{provider.apiKey ? provider.apiKey : "-"}</TableCell>
+                  <TableCell>
+                    <Badge variant={provider.apiKey ? "secondary" : "outline"}>
+                      {provider.apiKey ? "已配置" : "未配置"}
+                    </Badge>
+                  </TableCell>
                   <TableCell>
                     <div className="space-y-1 text-xs text-muted-foreground">
                       {Object.entries(provider.endpoints).map(([key, value]) => (
@@ -173,7 +200,7 @@ export function SystemSettingsPage() {
           <CardTitle>模型选择策略</CardTitle>
           <CardDescription>熔断与选择阈值</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
+        <CardContent className="settings-info-grid settings-info-grid--two">
           <InfoItem label="Failure Threshold" value={ai.selection.failureThreshold} />
           <InfoItem label="Open Duration (ms)" value={ai.selection.openDurationMs} />
         </CardContent>
@@ -184,7 +211,7 @@ export function SystemSettingsPage() {
           <CardTitle>流式响应</CardTitle>
           <CardDescription>输出分片大小</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-2">
+        <CardContent className="settings-info-grid settings-info-grid--two">
           <InfoItem label="Message Chunk Size" value={ai.stream.messageChunkSize} />
         </CardContent>
       </Card>
@@ -195,7 +222,7 @@ export function SystemSettingsPage() {
           <CardDescription>档位路由与候选注册表</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="settings-info-grid settings-info-grid--two">
             <InfoItem label="Default Tier" value={ai.chat.defaultTier ?? "-"} />
             <InfoItem label="Deep Thinking Tier" value={ai.chat.deepThinkingTier ?? "-"} />
           </div>
@@ -256,7 +283,7 @@ export function SystemSettingsPage() {
           <CardDescription>向量化模型列表</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="settings-info-grid settings-info-grid--two">
             <InfoItem label="Default Model" value={ai.embedding.defaultModel} />
           </div>
           <Table className="min-w-[720px]">
@@ -290,7 +317,7 @@ export function SystemSettingsPage() {
           <CardDescription>重排模型列表</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="settings-info-grid settings-info-grid--two">
             <InfoItem label="Default Model" value={ai.rerank.defaultModel} />
           </div>
           <Table className="min-w-[640px]">

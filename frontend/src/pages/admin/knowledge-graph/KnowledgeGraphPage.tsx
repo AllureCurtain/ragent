@@ -9,7 +9,6 @@ import {
   type IElementEvent,
   type NodeData
 } from "@antv/g6";
-import { Circle as GCircle } from "@antv/g";
 import { Library, Loader2, Minus, Plus, RefreshCw, Search, Settings, Share2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -28,26 +27,26 @@ import {
 } from "@/services/knowledgeService";
 import { getErrorMessage } from "@/utils/error";
 
-// 实体类型配色板，按类型首次出现顺序分配，超出后循环取色
+// 实体类型配色由产品矿物青、陶土与冷中性色推导，标签仍是主要分类通道。
 const TYPE_PALETTE = [
-  "#5B8FF9",
-  "#61DDAA",
-  "#F6BD16",
-  "#7262FD",
-  "#78D3F8",
-  "#F08BB4",
-  "#FF9845",
-  "#9661BC",
-  "#269A99",
-  "#D96D6C"
+  "#176C6B",
+  "#2F7D78",
+  "#4A8D84",
+  "#6B9C90",
+  "#8BAB9E",
+  "#C4633F",
+  "#B9785F",
+  "#986E62",
+  "#5B767A",
+  "#717A75"
 ];
-const FALLBACK_COLOR = "#94A3B8";
+const FALLBACK_COLOR = "#617573";
 
 // 概览时常显标签的目标数量：按度数取前 ~45 个高连接实体常显，密集图自动抬高门槛以压掉大范围文字遮挡，其余悬浮查看
 const LABEL_BUDGET = 45;
 
 // 边「淡网」：低透明度冷灰、让线退成节点背后的网。稠密图里边一花就毁整屏
-const EDGE_STROKE = "#CBD5E1";
+const EDGE_STROKE = "#B9C8C5";
 const EDGE_OPACITY = 0.34;
 // 曲线控制点偏移：曲线态用 20、直线态用 0（改 curveOffset 即可拉直，无需换边类型 / 重排）
 const EDGE_CURVE_OFFSET = 20;
@@ -101,7 +100,7 @@ function themeNodeStyle(
       size: 24 + d * 3,
       fill: baseColor,
       fillOpacity: 1,
-      stroke: "#ffffff",
+      stroke: "#FBFDFC",
       lineWidth: isHub ? 2 : 1.5,
       shadowColor: withAlpha(baseColor, 0.45),
       shadowBlur: 16
@@ -112,7 +111,7 @@ function themeNodeStyle(
     // 近白填充 + 类型色圆环：色只作点缀不再成片，最能压住「太花」又保留类型区分
     return {
       size,
-      fill: mixHex(baseColor, "#ffffff", 0.86),
+      fill: mixHex(baseColor, "#FBFDFC", 0.86),
       fillOpacity: 1,
       stroke: baseColor,
       lineWidth: isHub ? 2.5 : 1.8,
@@ -126,19 +125,19 @@ function themeNodeStyle(
       size,
       fill: baseColor,
       fillOpacity: 0.5,
-      stroke: "#ffffff",
+      stroke: "#FBFDFC",
       lineWidth: 1.25,
       shadowColor: withAlpha(baseColor, 0.3),
       shadowBlur: 12
     };
   }
   // pastel 柔彩：向白提亮成粉彩、白环、柔光
-  const soft = mixHex(baseColor, "#ffffff", 0.5);
+  const soft = mixHex(baseColor, "#FBFDFC", 0.5);
   return {
     size,
     fill: soft,
     fillOpacity: 1,
-    stroke: "#ffffff",
+    stroke: "#FBFDFC",
     lineWidth: isHub ? 2 : 1.5,
     shadowColor: withAlpha(soft, 0.34),
     shadowBlur: 10
@@ -662,222 +661,13 @@ function runEntrance(graph: Graph, onDone: () => void) {
   entranceRaf = requestAnimationFrame(step);
 }
 
-// 常态 hub 涟漪：仅给度数最高的少数核心实体（renderGraph 里按 deg>=6 取至多 4 个存入 hubRippleSpec）叠一层向外扩散的柔光环
-// 点出重点又不喧闹。环是 append 到节点组的 @antv/g Circle——子图形以局部 (0,0)=节点中心为原点、随相机缩放，pointerEvents:none 不拦交互；
-// rAF 逐帧推 r 与描边透明度形成水波。聚焦时停（focus 有自己的边流动戏份），散焦重建
-let hubRippleRaf = 0;
-let hubRippleSpec: Array<{ id: string; color: string; baseR: number }> = [];
-let hubRippleRings: Array<{ ring: GCircle; baseR: number; phase: number }> = [];
-// 聚焦时把涟漪限定在仍点亮的 hub（焦点自身或其 hub 邻居）；null 表示全量（常态）
-let hubRippleFilter: Set<string> | null = null;
-
-const HUB_RIPPLE_PERIOD = 2600;
-const HUB_RIPPLE_SPREAD = 22;
-const HUB_RIPPLE_RINGS = 2;
-
-/** 停止涟漪并移除环图形，保留 spec 以便散焦后重建 */
-function stopHubRipple() {
-  if (hubRippleRaf) {
-    cancelAnimationFrame(hubRippleRaf);
-    hubRippleRaf = 0;
-  }
-  for (const item of hubRippleRings) {
-    try {
-      item.ring.remove();
-    } catch {
-      /* 图已销毁 */
-    }
-  }
-  hubRippleRings = [];
-}
-
-/** 彻底清除涟漪（含 spec 与过滤），用于重建图 */
-function clearHubRipple() {
-  stopHubRipple();
-  hubRippleSpec = [];
-  hubRippleFilter = null;
-}
-
-/** 依 hubRippleSpec 为各核心实体建环并逐帧扩散；无 spec / 偏好减少动效则不建 */
-function buildHubRipple(graph: Graph) {
-  stopHubRipple();
-  if (hubRippleSpec.length === 0 || prefersReducedMotion()) {
-    return;
-  }
-  const canvas = graph.getCanvas();
-  for (const spec of hubRippleSpec) {
-    // 聚焦过滤：只给仍点亮的 hub 建环，淡出的 hub 跳过
-    if (hubRippleFilter && !hubRippleFilter.has(spec.id)) {
-      continue;
-    }
-    const host = canvas.document.getElementById(spec.id) as unknown as {
-      appendChild?: (child: GCircle) => void;
-    } | null;
-    if (!host?.appendChild) {
-      continue;
-    }
-    for (let k = 0; k < HUB_RIPPLE_RINGS; k++) {
-      const ring = new GCircle({
-        style: {
-          cx: 0,
-          cy: 0,
-          r: spec.baseR,
-          fill: "none",
-          stroke: spec.color,
-          lineWidth: 2,
-          strokeOpacity: 0,
-          pointerEvents: "none",
-          zIndex: -2
-        }
-      });
-      host.appendChild(ring);
-      hubRippleRings.push({ ring, baseR: spec.baseR, phase: k / HUB_RIPPLE_RINGS });
-    }
-  }
-  if (hubRippleRings.length === 0) {
-    return;
-  }
-  const step = (ts: number) => {
-    for (const item of hubRippleRings) {
-      const p = (((ts / HUB_RIPPLE_PERIOD + item.phase) % 1) + 1) % 1;
-      item.ring.style.r = item.baseR + p * HUB_RIPPLE_SPREAD;
-      // 越向外越淡、越细，收口成柔和水波
-      item.ring.style.strokeOpacity = (1 - p) * 0.35;
-      item.ring.style.lineWidth = 2 - p;
-    }
-    hubRippleRaf = requestAnimationFrame(step);
-  };
-  hubRippleRaf = requestAnimationFrame(step);
-}
-
-// 常态微动：入场落定后，让每个节点绕其基准位做极小幅（数 px）的正弦漂移——整张图像悬浮的星丛般持续轻轻游动，
-// 满足「页面一直在动」又不牺牲可读性：标签始终水平、空间关系稳定、点击命中随视觉元素同步移动。
-// 直接 setLocalPosition 改 @antv/g 节点组的平移分量（与 setLocalScale 一样只碰单个变换分量，不清缩放），
-// 绕过数据模型故 minimap / 布局不被逐帧惊动、开销只在画布重绘。振幅/周期/相位按节点 id 哈希派生（跨重捕获稳定不跳变），
-// 各轴周期不等故每个节点画一枚微椭圆而非直线来回。聚焦时暂停（放大的子网静止便于细看）、散焦恢复，
-// 被拖拽的节点当帧跳过、落点后重设基准，偏好减少动效或大图（>300 逐帧移动开销偏高）则不启用
-let ambientRaf = 0;
-let ambientStart = 0;
-let ambientNodes: Array<{
-  id: string;
-  el: { setLocalPosition: (x: number, y: number) => void };
-  baseX: number;
-  baseY: number;
-  ax: number;
-  ay: number;
-  wx: number;
-  wy: number;
-  px: number;
-  py: number;
-}> = [];
-// 正在拖拽的节点 id：ambient 当帧跳过它交给 drag-element，落点后在 DRAG_END 重设其基准
-let ambientDragId = "";
-
-const AMBIENT_MAX_NODES = 300;
-const AMBIENT_RAMP = 900;
-
-/** 字符串稳定哈希，从节点 id 派生每节点的漂移参数，保证同一节点每次派生一致、重捕获不跳变 */
-function hashStr(text: string): number {
-  let h = 0;
-  for (let i = 0; i < text.length; i++) {
-    h = (h * 31 + text.charCodeAt(i)) >>> 0;
-  }
-  return h;
-}
-
-/** 停止常态微动并把各节点写回基准位（元素可能已随图销毁，防御式忽略） */
-function stopAmbient() {
-  if (ambientRaf) {
-    cancelAnimationFrame(ambientRaf);
-    ambientRaf = 0;
-  }
-  for (const item of ambientNodes) {
-    try {
-      item.el.setLocalPosition(item.baseX, item.baseY);
-    } catch {
-      /* 图已销毁 */
-    }
-  }
-  ambientNodes = [];
-  ambientStart = 0;
-}
-
-/** 采集全体节点的基准位与漂移参数（入场后 / 散焦后启动时调用） */
-function captureAmbient(graph: Graph) {
-  ambientNodes = [];
-  const canvas = graph.getCanvas();
-  for (const datum of graph.getNodeData()) {
-    const id = String(datum.id);
-    const el = canvas.document.getElementById(id) as unknown as {
-      setLocalPosition: (x: number, y: number) => void;
-    } | null;
-    if (!el) {
-      continue;
-    }
-    const pos = graph.getElementPosition(id);
-    const baseX = Number(pos[0]);
-    const baseY = Number(pos[1]);
-    if (!Number.isFinite(baseX) || !Number.isFinite(baseY)) {
-      continue;
-    }
-    const h = hashStr(id);
-    ambientNodes.push({
-      id,
-      el,
-      baseX,
-      baseY,
-      // 振幅 3.5~6.9px；x/y 周期 3.5~7s 且互不相等；相位散布 [0,2π)
-      ax: 3.5 + (h % 35) / 10,
-      ay: 3.5 + ((h >> 3) % 35) / 10,
-      wx: (2 * Math.PI) / (3500 + (h % 3500)),
-      wy: (2 * Math.PI) / (3500 + ((h >> 5) % 3500)),
-      px: (h % 628) / 100,
-      py: ((h >> 7) % 628) / 100
-    });
-  }
-}
-
-/** 启动常态微动；偏好减少动效 / 无节点 / 大图则不启用（仍保留 hub 涟漪） */
-function startAmbient(graph: Graph) {
-  stopAmbient();
-  if (prefersReducedMotion()) {
-    return;
-  }
-  captureAmbient(graph);
-  if (ambientNodes.length === 0 || ambientNodes.length > AMBIENT_MAX_NODES) {
-    ambientNodes = [];
-    return;
-  }
-  const step = (ts: number) => {
-    if (!ambientStart) {
-      ambientStart = ts;
-    }
-    // 振幅在起始 ~0.9s 内从 0 缓入，避免入场结束瞬间的位移突跳，也让「活起来」更从容
-    const ramp = Math.min((ts - ambientStart) / AMBIENT_RAMP, 1);
-    for (const item of ambientNodes) {
-      if (item.id === ambientDragId) {
-        continue;
-      }
-      item.el.setLocalPosition(
-        item.baseX + ramp * item.ax * Math.sin(ts * item.wx + item.px),
-        item.baseY + ramp * item.ay * Math.sin(ts * item.wy + item.py)
-      );
-    }
-    ambientRaf = requestAnimationFrame(step);
-  };
-  ambientRaf = requestAnimationFrame(step);
-}
-
 /**
  * 运行期切换视觉主题：改模块量 vizTheme，再 updateNodeData 把节点标记为脏以触发 draw 重跑样式映射（映射按 live vizTheme 现算、
  * 才是真正决定最终样式者；updateNodeData 的 style 载荷只为标脏、与映射同值）。只重绘不重排、节点不动。
- * 同步刷新 hub 涟漪的半径与颜色以贴合新尺寸；draw 会重建图元，故先停涟漪与微动、draw 后再重建，避免其直接改的图元被 draw 波及
  */
 function applyTheme(graph: Graph, theme: VizTheme) {
   vizTheme = theme;
   stopEdgeFlow();
-  stopAmbient();
-  stopHubRipple();
   graph.updateNodeData(
     graph.getNodeData().map((node) => ({
       id: String(node.id),
@@ -890,41 +680,22 @@ function applyTheme(graph: Graph, theme: VizTheme) {
       }
     }))
   );
-  // 涟漪半径 / 颜色贴合主题化后的新尺寸与新填充
-  for (const spec of hubRippleSpec) {
-    const datum = graph.getNodeData(spec.id);
-    const s = themeNodeStyle(
-      theme,
-      String(datum?.data?.baseColor ?? FALLBACK_COLOR),
-      Number(datum?.data?.degree ?? 0)
-    );
-    spec.baseR = s.size / 2;
-    spec.color = s.fill;
-  }
-  void graph.draw().then(() => {
-    buildHubRipple(graph);
-    startAmbient(graph);
-  });
+  void graph.draw();
 }
 
 /**
  * 运行期切换连线形状 / 箭头：模块量 edgeCurved/edgeArrow 由 handler 改好，再 updateEdgeData 把边标记为脏以触发 draw 重跑样式映射
- * （curveOffset/endArrow 映射按 live 模块量现算，0=直线）。只重绘不重排。同 applyTheme：draw 前后停 / 重建涟漪与微动
+ * （curveOffset/endArrow 映射按 live 模块量现算，0=直线）。只重绘不重排。
  */
 function applyEdgeLook(graph: Graph) {
   stopEdgeFlow();
-  stopAmbient();
-  stopHubRipple();
   graph.updateEdgeData(
     graph.getEdgeData().map((edge) => ({
       id: String(edge.id),
       style: { curveOffset: edgeCurved ? EDGE_CURVE_OFFSET : 0, endArrow: edgeArrow }
     }))
   );
-  void graph.draw().then(() => {
-    buildHubRipple(graph);
-    startAmbient(graph);
-  });
+  void graph.draw();
 }
 
 /**
@@ -934,8 +705,6 @@ function applyEdgeLook(graph: Graph) {
 function applyFocus(graph: Graph, id: string) {
   // 聚焦优先：入场动画若在播则立即落定，把动效焦点让给选中实体
   stopEntrance();
-  // 暂停常态微动：聚焦是「静下来细看」的场景，让被放大的子网稳住、不再游动
-  stopAmbient();
   // 首次进入聚焦时记下当前相机（缩放 + 屏幕中心对应的世界坐标），供散焦还原；A→B 连续切换不覆盖，保留最初视角
   if (savedView === null) {
     const [w, h] = graph.getSize();
@@ -957,9 +726,6 @@ function applyFocus(graph: Graph, id: string) {
   zoomToNodes(graph, [id, ...neighborIds], true);
   // 仅给聚焦节点的关系边启动流动动画，开销与语义都限定在选中实体的关系上
   startEdgeFlow(graph, [...keepEdges]);
-  // 保留核心涟漪，但仅限仍点亮的 hub（焦点自身或其 hub 邻居）；淡出的 hub 不再脉动，免得在暗色 veil 下喧闹
-  hubRippleFilter = keepNodes;
-  buildHubRipple(graph);
 }
 
 /** 散焦：清空淡出状态，并把相机还原到聚焦前的快照（无快照则不动），避免停在放大比例回不去 */
@@ -984,22 +750,12 @@ function clearFocus(graph: Graph) {
       return graph.translateBy([w / 2 - p[0], h / 2 - p[1]], true);
     });
   }
-  // 散焦恢复全量 hub 涟漪：此前处于聚焦过滤态才重建，避免空白处反复点击导致光环频繁重启闪烁
-  if (hubRippleFilter !== null) {
-    hubRippleFilter = null;
-    buildHubRipple(graph);
-  } else if (hubRippleRaf === 0) {
-    buildHubRipple(graph);
-  }
-  // 恢复常态微动：仅在其确已停止时重启（空白处反复点击时它仍在跑，不重启免得相位回弹突跳）
-  if (ambientRaf === 0) {
-    startAmbient(graph);
-  }
 }
 
 export function KnowledgeGraphPage() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<Graph | null>(null);
+  const loadSequenceRef = useRef(0);
   // 当前聚焦节点 id，用 ref 供 G6 事件回调同步读取，实现再次点击同一节点即取消聚焦
   const focusedIdRef = useRef<string>("");
 
@@ -1046,13 +802,15 @@ export function KnowledgeGraphPage() {
     if (!container) {
       return;
     }
-    // 重建前停掉上一张图的所有动效（边流动 / 入场 / hub 涟漪），清空聚焦相机快照，避免残留 rAF 与还原到上一张图视角
+    // 重建前停掉上一张图的反馈动效，清空聚焦相机快照。
     // 先停后 destroy：让写回基线落在仍存活的元素上
     stopEdgeFlow();
     stopEntrance();
-    stopAmbient();
-    clearHubRipple();
-    graphRef.current?.destroy();
+    if (graphRef.current && !graphRef.current.destroyed) {
+      graphRef.current.off();
+      graphRef.current.destroy();
+    }
+    graphRef.current = null;
     savedView = null;
 
     const colors = buildTypeColors(data.nodes);
@@ -1074,20 +832,6 @@ export function KnowledgeGraphPage() {
     const sortedDegrees = data.nodes.map((node) => degree[node.id] || 0).sort((a, b) => b - a);
     const labelMinDegree =
       sortedDegrees.length > LABEL_BUDGET ? Math.max(sortedDegrees[LABEL_BUDGET], 1) : 0;
-    // 常态涟漪的核心实体：取度数最高、且达「核心」门槛（deg>=6，与描边 / 标签加粗同一档）的至多 4 个作为脉动对象
-    // 小图或无高连接实体时自然为空、不做涟漪；color / baseR 对齐主题化后的节点填充与视觉半径，让光环从节点边缘向外扩散
-    hubRippleSpec = [...data.nodes]
-      .filter((node) => (degree[node.id] || 0) >= 6)
-      .sort((a, b) => (degree[b.id] || 0) - (degree[a.id] || 0))
-      .slice(0, 4)
-      .map((node) => {
-        const s = themeNodeStyle(
-          vizTheme,
-          colors[node.type?.trim() || ""] || FALLBACK_COLOR,
-          degree[node.id] || 0
-        );
-        return { id: node.id, color: s.fill, baseR: s.size / 2 };
-      });
     // 节点 id→名称映射，供边悬浮展示「实体A → 实体B」
     const nameById: Record<string, string> = {};
     for (const node of data.nodes) {
@@ -1184,11 +928,11 @@ export function KnowledgeGraphPage() {
           // 度数层次：hub 标签更大更粗更深，叶子收敛，压掉满屏标签的杂乱
           labelFontSize: (d: NodeData) => 10 + Math.min(Number(d.data?.degree ?? 0), 12) * 0.4,
           labelFontWeight: (d: NodeData) => (Number(d.data?.degree ?? 0) >= 6 ? 600 : 400),
-          labelFill: (d: NodeData) => (Number(d.data?.degree ?? 0) >= 6 ? "#1E293B" : "#64748B"),
+          labelFill: (d: NodeData) => (Number(d.data?.degree ?? 0) >= 6 ? "#102322" : "#617573"),
           // 度数达门槛才常显（1），否则隐去（0）压掉密集处文字遮挡；聚焦时由 related 态覆盖为 1
           labelOpacity: (d: NodeData) => (Number(d.data?.degree ?? 0) >= labelMinDegree ? 1 : 0),
           labelBackground: true,
-          labelBackgroundFill: "#ffffff",
+          labelBackgroundFill: "#FBFDFC",
           labelBackgroundOpacity: (d: NodeData) =>
             Number(d.data?.degree ?? 0) >= labelMinDegree ? 0.6 : 0,
           labelBackgroundRadius: 4
@@ -1232,7 +976,7 @@ export function KnowledgeGraphPage() {
           // 聚焦节点的关系边：着色加粗 + 虚线 + 显方向，配合 lineDashOffset 逐帧推进形成流动。
           // 显式点亮 opacity 与 endArrow：无论概览把边压得多淡 / 是否显箭头，聚焦子网都清晰可辨、方向明确
           flow: {
-            stroke: "#6366F1",
+            stroke: "#176C6B",
             lineWidth: 1.5,
             lineDash: [6, 6],
             opacity: 0.95,
@@ -1254,14 +998,14 @@ export function KnowledgeGraphPage() {
           type: "minimap",
           size: [180, 120],
           padding: 8,
-          // 视口指示框：靛蓝描边 + 淡填充，一眼看清当前视野在全图中的位置
-          maskStyle: { border: "1.5px solid #6366F1", background: "rgba(99, 102, 241, 0.12)" },
-          // 缩略图容器：圆角 + 描边 + 柔和投影 + 近白底，与玻璃工具栏一致、节点在白底上更清晰
+          // 视口指示框：矿物青描边 + 淡填充，一眼看清当前视野在全图中的位置
+          maskStyle: { border: "1.5px solid #176C6B", background: "rgba(23, 108, 107, 0.12)" },
+          // 缩略图容器：圆角 + 描边 + 柔和投影 + 近白底，节点在浅底上更清晰
           containerStyle: {
             borderRadius: "12px",
-            border: "1px solid #E2E8F0",
-            boxShadow: "0 6px 16px rgba(15, 23, 42, 0.10)",
-            background: "rgba(255, 255, 255, 0.92)",
+            border: "1px solid rgba(16, 35, 34, 0.10)",
+            boxShadow: "0 6px 16px rgba(15, 48, 45, 0.10)",
+            background: "rgba(251, 253, 252, 0.94)",
             overflow: "hidden"
           }
         },
@@ -1292,9 +1036,9 @@ export function KnowledgeGraphPage() {
               const type = escapeHtml(entityTypeLabel(String(datum.type ?? "")));
               const desc = escapeHtml(String(datum.description ?? ""));
               return `<div style="max-width:280px;padding:4px 2px">
-                <div style="font-weight:600;color:#0f172a;margin-bottom:2px">${name}</div>
-                ${type ? `<div style="font-size:12px;color:#6366f1;margin-bottom:4px">${type}</div>` : ""}
-                ${desc ? `<div style="font-size:12px;color:#475569;line-height:1.5;white-space:pre-line">${desc}</div>` : ""}
+                <div style="font-weight:600;color:#102322;margin-bottom:2px">${name}</div>
+                ${type ? `<div style="font-size:12px;color:#176c6b;margin-bottom:4px">${type}</div>` : ""}
+                ${desc ? `<div style="font-size:12px;color:#354b49;line-height:1.5;white-space:pre-line">${desc}</div>` : ""}
               </div>`;
             }
             // 边卡片：关系两端 + 可读关系描述（描述缺失回退关键词），替代画布上难懂的英文标签
@@ -1303,9 +1047,9 @@ export function KnowledgeGraphPage() {
               const to = escapeHtml(String(datum.targetName ?? ""));
               const detail = escapeHtml(String(datum.description || datum.label || ""));
               return `<div style="max-width:280px;padding:4px 2px">
-                <div style="font-size:11px;color:#94a3b8;margin-bottom:2px">关系</div>
-                <div style="font-weight:600;color:#0f172a;margin-bottom:4px">${from} <span style="color:#6366f1">→</span> ${to}</div>
-                ${detail ? `<div style="font-size:12px;color:#475569;line-height:1.5;white-space:pre-line">${detail}</div>` : ""}
+                <div style="font-size:11px;color:#617573;margin-bottom:2px">关系</div>
+                <div style="font-weight:600;color:#102322;margin-bottom:4px">${from} <span style="color:#176c6b">→</span> ${to}</div>
+                ${detail ? `<div style="font-size:12px;color:#354b49;line-height:1.5;white-space:pre-line">${detail}</div>` : ""}
               </div>`;
             }
             return "";
@@ -1314,24 +1058,27 @@ export function KnowledgeGraphPage() {
       ]
     });
 
-    // 力导收敛后：先按视口比例把圆团横向摊开铺满页面（reshapeToViewport，仅力导），再按「保持节点当前大小」取景
-    // （fitAllNodes 内部把比例夹在 [0.68,1.3]，避免为塞离群点把节点缩糊）。取景落定后播一次性入场动画，结束即启动常态 hub 涟漪与微动
+    // 力导收敛后：先按视口比例把圆团横向摊开铺满页面（reshapeToViewport，仅力导），再按「保持节点当前大小」取景。
     // 入场在 reshape / 取景之后预置隐藏并逐帧淡入，故不被布局重绘清掉、也不闪一下全显
     graph.on(GraphEvent.AFTER_LAYOUT, () => {
+      if (graph.destroyed || graphRef.current !== graph) {
+        return;
+      }
       const settled =
         layoutRef.current === "d3-force"
           ? reshapeToViewport(graph).then(() => fitAllNodes(graph, false))
           : fitAllNodes(graph, false);
-      void settled.then(() =>
-        runEntrance(graph, () => {
-          buildHubRipple(graph);
-          startAmbient(graph);
-        })
-      );
+      void settled.then(() => {
+        if (!graph.destroyed && graphRef.current === graph) {
+          runEntrance(graph, () => undefined);
+        }
+      });
     });
     // 视口缩放 / 平移后同步右下角缩放比读数，wheel、捏合、按钮触发的变换都会走到这里
     graph.on(GraphEvent.AFTER_TRANSFORM, () => {
-      setZoomPct(Math.round(graph.getZoom() * 100));
+      if (graph.rendered && !graph.destroyed && graphRef.current === graph) {
+        setZoomPct(Math.round(graph.getZoom() * 100));
+      }
     });
     // 点击节点聚焦：淡出无关、居中放大；再次点击同一节点 / 点击空白 / Esc 均散焦还原
     graph.on<IElementEvent>(NodeEvent.CLICK, (event) => {
@@ -1357,26 +1104,24 @@ export function KnowledgeGraphPage() {
       focusedIdRef.current = "";
       setFocusName("");
     });
-    // 拖拽某节点时 ambient 当帧跳过它（交给 drag-element 独占），落点后把它的基准位重设到落点，免得被漂移拉回原处
-    graph.on<IElementEvent>(NodeEvent.DRAG_START, (event) => {
-      ambientDragId = String(event.target?.id ?? "");
-    });
-    graph.on<IElementEvent>(NodeEvent.DRAG_END, (event) => {
-      const id = String(event.target?.id ?? "");
-      const item = ambientNodes.find((n) => n.id === id);
-      if (item) {
-        const pos = graph.getElementPosition(id);
-        item.baseX = Number(pos[0]);
-        item.baseY = Number(pos[1]);
-      }
-      ambientDragId = "";
-    });
     graphRef.current = graph;
-    void graph.render();
+    void graph
+      .render()
+      .then(() => {
+        if (!graph.destroyed && graphRef.current === graph) {
+          setZoomPct(Math.round(graph.getZoom() * 100));
+        }
+      })
+      .catch((error) => {
+        if (!graph.destroyed && graphRef.current === graph) {
+          setErrorMsg(getErrorMessage(error, "渲染图谱失败"));
+        }
+      });
   }, []);
 
   const loadGraph = useCallback(
     async (entity?: string, overrides?: { depth?: number; limit?: number }) => {
+      const loadSequence = ++loadSequenceRef.current;
       setLoading(true);
       setErrorMsg(null);
       try {
@@ -1387,23 +1132,32 @@ export function KnowledgeGraphPage() {
           depth: overrides?.depth ?? Number(depth),
           limit: overrides?.limit ?? Number(limit)
         });
+        if (loadSequence !== loadSequenceRef.current) {
+          return;
+        }
         setView(result);
         setActiveEntity(entity || "");
         setFocusName("");
         focusedIdRef.current = "";
         renderGraph(result);
       } catch (error) {
+        if (loadSequence !== loadSequenceRef.current) {
+          return;
+        }
         const message = getErrorMessage(error, "加载图谱失败");
         setErrorMsg(message);
         setView(null);
         stopEdgeFlow();
         stopEntrance();
-        stopAmbient();
-        clearHubRipple();
-        graphRef.current?.destroy();
+        if (graphRef.current && !graphRef.current.destroyed) {
+          graphRef.current.off();
+          graphRef.current.destroy();
+        }
         graphRef.current = null;
       } finally {
-        setLoading(false);
+        if (loadSequence === loadSequenceRef.current) {
+          setLoading(false);
+        }
       }
     },
     [depth, limit, renderGraph]
@@ -1413,11 +1167,13 @@ export function KnowledgeGraphPage() {
   useEffect(() => {
     void loadGraph();
     return () => {
+      loadSequenceRef.current += 1;
       stopEdgeFlow();
       stopEntrance();
-      stopAmbient();
-      clearHubRipple();
-      graphRef.current?.destroy();
+      if (graphRef.current && !graphRef.current.destroyed) {
+        graphRef.current.off();
+        graphRef.current.destroy();
+      }
       graphRef.current = null;
     };
     // 仅首挂载执行，后续加载由交互触发
@@ -1637,15 +1393,8 @@ export function KnowledgeGraphPage() {
   const isEmpty = !loading && !errorMsg && view !== null && view.nodes.length === 0;
 
   return (
-    <div className="relative h-full w-full overflow-hidden bg-white">
-      {/* G6 画布铺满整个视口；衬一层极淡径向渐变增加空间纵深，画布透明故渐变透出、与网格线叠成柔和台面 */}
-      <div
-        ref={containerRef}
-        className="h-full w-full"
-        style={{
-          background: "radial-gradient(ellipse at 50% 42%, #ffffff 0%, #f4f6fa 58%, #e9edf4 100%)"
-        }}
-      />
+    <div className="relative h-full w-full overflow-hidden bg-[var(--bg-secondary)]">
+      <div ref={containerRef} className="h-full w-full bg-[var(--bg-secondary)]" />
 
       {/* 左上角悬浮控件：搜索 + 范围 + 全图 + 显示设置，以及聚焦态与图例 */}
       <div className="absolute left-4 top-4 z-10 flex max-w-[calc(100%-2rem)] flex-col gap-2">

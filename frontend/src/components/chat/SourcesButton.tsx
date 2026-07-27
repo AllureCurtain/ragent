@@ -24,10 +24,10 @@ export function SourcesButton({ messageId, sources }: SourcesButtonProps) {
       type="button"
       onClick={() => toggleSourcesPanel(messageId)}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full py-1 pl-1.5 pr-2.5 text-xs transition-colors",
+        "inline-flex min-h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors",
         active
-          ? "bg-[#F0F0F1] text-[#1A1A1A]"
-          : "text-[#666666] hover:bg-[#F0F0F1] hover:text-[#1A1A1A]"
+          ? "bg-[var(--accent-light)] text-[var(--accent-primary)]"
+          : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
       )}
     >
       <span className="flex items-center">
@@ -35,7 +35,7 @@ export function SourcesButton({ messageId, sources }: SourcesButtonProps) {
           <span
             key={`${source.docId}-${idx}`}
             className={cn(
-              "flex h-5 w-5 items-center justify-center rounded-md bg-white ring-1 ring-[#EAEAEA]",
+              "flex h-5 w-5 items-center justify-center rounded-md bg-[var(--bg-primary)] ring-1 ring-[var(--border-default)]",
               idx > 0 && "-ml-1.5"
             )}
           >

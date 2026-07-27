@@ -3,13 +3,42 @@ import { useNavigate, useParams } from "react-router-dom";
 import { CircleHelp, PenSquare, Plus, RefreshCw, ShieldCheck, ShieldX, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -93,7 +122,9 @@ export function KnowledgeChunksPage() {
 
   useEffect(() => {
     if (kbId) {
-      getKnowledgeBase(kbId).then(kb => setKbName(kb.name)).catch(() => {});
+      getKnowledgeBase(kbId)
+        .then((kb) => setKbName(kb.name))
+        .catch(() => {});
     }
   }, [kbId]);
 
@@ -105,7 +136,8 @@ export function KnowledgeChunksPage() {
     setSelectedIds(new Set());
   }, [docId, enabledFilter]);
 
-  const allSelected = chunks.length > 0 && chunks.every((chunk) => selectedIds.has(String(chunk.id)));
+  const allSelected =
+    chunks.length > 0 && chunks.every((chunk) => selectedIds.has(String(chunk.id)));
 
   const toggleSelectAll = () => {
     if (allSelected) {
@@ -233,11 +265,19 @@ export function KnowledgeChunksPage() {
                 <RefreshCw className="mr-2 h-4 w-4" />
                 刷新
               </Button>
-              <Button variant="outline" onClick={() => handleBatchToggle(true)} disabled={selectedList.length === 0}>
+              <Button
+                variant="outline"
+                onClick={() => handleBatchToggle(true)}
+                disabled={selectedList.length === 0}
+              >
                 <ShieldCheck className="mr-2 h-4 w-4" />
                 批量启用
               </Button>
-              <Button variant="outline" onClick={() => handleBatchToggle(false)} disabled={selectedList.length === 0}>
+              <Button
+                variant="outline"
+                onClick={() => handleBatchToggle(false)}
+                disabled={selectedList.length === 0}
+              >
                 <ShieldX className="mr-2 h-4 w-4" />
                 批量禁用
               </Button>
@@ -300,14 +340,24 @@ export function KnowledgeChunksPage() {
                     </TableCell>
                     <TableCell>{chunk.charCount ?? "-"}</TableCell>
                     <TableCell>{chunk.tokenCount ?? "-"}</TableCell>
-                    <TableCell><RelativeTime value={chunk.updateTime} /></TableCell>
+                    <TableCell>
+                      <RelativeTime value={chunk.updateTime} />
+                    </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setEditDialog({ open: true, chunk })}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEditDialog({ open: true, chunk })}
+                        >
                           <PenSquare className="mr-0.1 h-4 w-4" />
                           编辑
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleToggleEnabled(chunk)}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleToggleEnabled(chunk)}
+                        >
                           {chunk.enabled === 1 ? "禁用" : "启用"}
                         </Button>
                         <Button
@@ -331,7 +381,12 @@ export function KnowledgeChunksPage() {
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
               <span>共 {pageData.total} 条</span>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setPageNo((prev) => Math.max(1, prev - 1))} disabled={pageData.current <= 1}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPageNo((prev) => Math.max(1, prev - 1))}
+                  disabled={pageData.current <= 1}
+                >
                   上一页
                 </Button>
                 <span>
@@ -378,7 +433,10 @@ export function KnowledgeChunksPage() {
         }}
       />
 
-      <AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => (!open ? setDeleteTarget(null) : null)}>
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => (!open ? setDeleteTarget(null) : null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>确认删除分块？</AlertDialogTitle>
@@ -386,13 +444,15 @@ export function KnowledgeChunksPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground">
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-destructive text-destructive-foreground"
+            >
               删除
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
     </div>
   );
 }
@@ -429,7 +489,10 @@ function ChunkDialog({ mode, open, chunk, onOpenChange, onSubmit }: ChunkDialogP
     }
 
     const indexValue = chunkIndex.trim() === "" ? null : Number(chunkIndex);
-    if (chunkIndex.trim() !== "" && (Number.isNaN(indexValue) || !Number.isInteger(indexValue) || (indexValue as number) < 0)) {
+    if (
+      chunkIndex.trim() !== "" &&
+      (Number.isNaN(indexValue) || !Number.isInteger(indexValue) || (indexValue as number) < 0)
+    ) {
       toast.error("序号必须为非负整数");
       return;
     }
@@ -450,7 +513,10 @@ function ChunkDialog({ mode, open, chunk, onOpenChange, onSubmit }: ChunkDialogP
       <DialogContent
         className="sm:max-w-[760px] overflow-hidden flex flex-col max-h-[85vh]"
         onOpenAutoFocus={(e) => e.preventDefault()}
-        onCloseAutoFocus={(e) => { e.preventDefault(); requestAnimationFrame(() => (document.activeElement as HTMLElement)?.blur()); }}
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          queueMicrotask(() => (document.activeElement as HTMLElement)?.blur());
+        }}
       >
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "新建分块" : "编辑分块"}</DialogTitle>

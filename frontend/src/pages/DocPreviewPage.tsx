@@ -1,16 +1,19 @@
 import * as React from "react";
-import { useParams } from "react-router-dom";
-import { FileText, Loader2 } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, FileText, Loader2, RefreshCw } from "lucide-react";
 
 import { DocumentPreview } from "@/components/document/DocumentPreview";
+import { Button } from "@/components/ui/button";
 import { getDocument } from "@/services/knowledgeService";
 
 type DocMeta = Awaited<ReturnType<typeof getDocument>>;
 
 export function DocPreviewPage() {
   const { docId } = useParams<{ docId: string }>();
+  const navigate = useNavigate();
   const [doc, setDoc] = React.useState<DocMeta | null>(null);
   const [status, setStatus] = React.useState<"loading" | "done" | "error">("loading");
+  const [retryKey, setRetryKey] = React.useState(0);
 
   React.useEffect(() => {
     if (!docId) {
@@ -32,30 +35,49 @@ export function DocPreviewPage() {
     return () => {
       cancelled = true;
     };
-  }, [docId]);
+  }, [docId, retryKey]);
 
   return (
-    <div className="flex h-screen flex-col bg-white">
-      <header className="flex shrink-0 items-center gap-2 border-b border-[#EFEFEF] px-6 py-3.5">
-        <FileText className="h-5 w-5 shrink-0 text-[#666666]" />
-        <h1 className="truncate text-base font-medium text-[#1A1A1A]" title={doc?.docName || ""}>
-          {doc?.docName || "文档预览"}
-        </h1>
+    <div className="document-preview-page">
+      <header className="document-preview-header">
+        <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="返回上一页">
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        </Button>
+        <div className="document-preview-icon" aria-hidden="true">
+          <FileText className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <h1 title={doc?.docName || ""}>{doc?.docName || "文档预览"}</h1>
+          <p>来源原文</p>
+        </div>
       </header>
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <main id="main-content" className="flex flex-1 flex-col overflow-hidden">
         {status === "loading" ? (
-          <div className="flex flex-1 items-center justify-center gap-2 text-sm text-[#999999]">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            正在加载…
+          <div className="document-preview-state" role="status">
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+            <div>
+              <p>正在加载文档</p>
+              <span>内容准备完成后会在此处显示。</span>
+            </div>
           </div>
         ) : status === "error" || !doc || !docId ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-[#999999]">
-            无法加载该文档，可能已被删除。
+          <div className="document-preview-state" role="alert">
+            <FileText className="h-5 w-5" aria-hidden="true" />
+            <div>
+              <p>无法加载文档</p>
+              <span>文档可能已被删除，或当前连接暂时不可用。</span>
+            </div>
+            {docId ? (
+              <Button variant="outline" size="sm" onClick={() => setRetryKey((value) => value + 1)}>
+                <RefreshCw className="mr-2 h-4 w-4" aria-hidden="true" />
+                重试
+              </Button>
+            ) : null}
           </div>
         ) : (
           <DocumentPreview docId={docId} fileType={doc.fileType} docName={doc.docName} />
         )}
-      </div>
+      </main>
     </div>
   );
 }

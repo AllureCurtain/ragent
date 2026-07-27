@@ -16,6 +16,10 @@ interface MessageListProps {
 }
 
 export function MessageList({ messages, isLoading, isStreaming, sessionKey }: MessageListProps) {
+  const reducedMotion = React.useMemo(
+    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+    []
+  );
   const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
   const scrollerRef = React.useRef<HTMLElement | null>(null);
   const lastSessionRef = React.useRef<string | null>(null);
@@ -58,9 +62,9 @@ export function MessageList({ messages, isLoading, isStreaming, sessionKey }: Me
     virtuosoRef.current?.scrollToIndex({
       index: flatIndex,
       align: "start",
-      behavior: "smooth"
+      behavior: reducedMotion ? "auto" : "smooth"
     });
-  }, []);
+  }, [reducedMotion]);
 
   const handleRangeChanged = React.useCallback(
     (range: { startIndex: number; endIndex: number }) => {
@@ -200,13 +204,16 @@ export function MessageList({ messages, isLoading, isStreaming, sessionKey }: Me
         scroller.scrollTo({ top: scroller.scrollTop + delta, behavior });
       }
     };
-    const smoothTimer = window.setTimeout(() => revealBottom("smooth"), 100);
+    const smoothTimer = window.setTimeout(
+      () => revealBottom(reducedMotion ? "auto" : "smooth"),
+      100
+    );
     const snapTimer = window.setTimeout(() => revealBottom("auto"), 420);
     return () => {
       window.clearTimeout(smoothTimer);
       window.clearTimeout(snapTimer);
     };
-  }, [recommendReveal]);
+  }, [recommendReveal, reducedMotion]);
 
   const handleTotalListHeightChanged = React.useCallback(() => {
     if (isLoading) {
@@ -251,7 +258,7 @@ export function MessageList({ messages, isLoading, isStreaming, sessionKey }: Me
       ({ className, ...props }, ref) => (
         <div
           ref={ref}
-          className={cn("mx-auto max-w-[840px] space-y-10 px-6 pt-10 pb-2 md:px-8", className)}
+          className={cn("mx-auto max-w-[880px] space-y-8 px-4 pb-2 pt-8 sm:px-6 md:pt-10", className)}
           {...props}
         />
       )

@@ -28,14 +28,14 @@ module.exports = {
         "chat-assistant": "hsl(var(--chat-assistant))"
       },
       fontFamily: {
-        display: ["'Space Grotesk'", "ui-sans-serif", "system-ui"],
-        body: ["'DM Sans'", "ui-sans-serif", "system-ui"],
+        display: ["'Manrope'", "'PingFang SC'", "'Microsoft YaHei'", "ui-sans-serif", "system-ui"],
+        body: ["'Manrope'", "'PingFang SC'", "'Microsoft YaHei'", "ui-sans-serif", "system-ui"],
         mono: ["'JetBrains Mono'", "ui-monospace", "SFMono-Regular"]
       },
       boxShadow: {
-        soft: "0 24px 60px -30px rgba(10, 10, 15, 0.65)",
-        glow: "0 0 0 1px rgba(59, 130, 246, 0.2), 0 16px 40px rgba(59, 130, 246, 0.25)",
-        neon: "0 0 30px rgba(59, 130, 246, 0.35)"
+        soft: "0 18px 44px -28px rgba(15, 48, 45, 0.36)",
+        glow: "0 0 0 3px rgba(23, 108, 107, 0.12), 0 14px 32px -24px rgba(15, 48, 45, 0.42)",
+        neon: "0 0 0 3px rgba(23, 108, 107, 0.12)"
       },
       keyframes: {
         "fade-up": {
@@ -46,7 +46,7 @@ module.exports = {
           "0%, 100%": { opacity: 1 },
           "50%": { opacity: 0.5 }
         },
-        "blink": {
+        blink: {
           "0%, 100%": { opacity: 1 },
           "50%": { opacity: 0 }
         },
@@ -54,22 +54,22 @@ module.exports = {
           "0%": { transform: "rotate(0deg)" },
           "100%": { transform: "rotate(360deg)" }
         },
-        "glow": {
+        glow: {
           "0%, 100%": { opacity: 0.5 },
           "50%": { opacity: 1 }
         },
-        "float": {
+        float: {
           "0%, 100%": { transform: "translateY(0)" },
           "50%": { transform: "translateY(-6px)" }
         }
       },
       animation: {
-        "fade-up": "fade-up 0.35s ease-out",
+        "fade-up": "fade-up 0.42s cubic-bezier(0.16, 1, 0.3, 1)",
         "pulse-soft": "pulse-soft 1.4s ease-in-out infinite",
-        "blink": "blink 1s step-end infinite",
+        blink: "blink 1s step-end infinite",
         "spin-slow": "spin-slow 4s linear infinite",
-        "glow": "glow 2.6s ease-in-out infinite",
-        "float": "float 6s ease-in-out infinite"
+        glow: "glow 2.6s cubic-bezier(0.16, 1, 0.3, 1) infinite",
+        float: "float 6s ease-in-out infinite"
       },
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",

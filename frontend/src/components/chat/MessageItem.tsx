@@ -56,33 +56,33 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
           <ThinkingIndicator content={message.thinking} duration={message.thinkingDuration} />
         ) : null}
         {!isThinking && hasThinking ? (
-          <div className="overflow-hidden rounded-lg border border-[#BFDBFE] bg-[#DBEAFE]">
+          <div className="overflow-hidden rounded-[10px] border border-[var(--border-accent)] bg-[var(--accent-light)]">
             <button
               type="button"
               onClick={() => setThinkingExpanded((prev) => !prev)}
-              className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-[#BFDBFE]/30"
+              className="flex min-h-11 w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--accent-light)_70%,var(--bg-primary))]"
             >
               <div className="flex flex-1 items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#BFDBFE]">
-                  <Brain className="h-4 w-4 text-[#2563EB]" />
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--bg-primary)] text-[var(--accent-primary)] shadow-[var(--shadow-xs)]">
+                  <Brain className="h-4 w-4" />
                 </div>
-                <span className="text-sm font-medium text-[#2563EB]">深度思考</span>
+                <span className="text-sm font-semibold text-[var(--accent-primary)]">深度思考</span>
                 {thinkingDuration ? (
-                  <span className="rounded-full bg-[#BFDBFE] px-2 py-0.5 text-xs text-[#2563EB]">
+                  <span className="rounded-md bg-[var(--bg-primary)] px-2 py-0.5 text-xs text-[var(--text-tertiary)]">
                     {thinkingDuration}
                   </span>
                 ) : null}
               </div>
               <ChevronDown
                 className={cn(
-                  "h-4 w-4 text-[#3B82F6] transition-transform",
+                  "h-4 w-4 text-[var(--accent-primary)] transition-transform",
                   thinkingExpanded && "rotate-180"
                 )}
               />
             </button>
             {thinkingExpanded ? (
-              <div className="border-t border-[#BFDBFE] px-4 pb-4">
-                <div className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-[#1E40AF]">
+              <div className="border-t border-[var(--border-accent)] px-4 pb-4">
+                <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--text-secondary)]">
                   {message.thinking}
                 </div>
               </div>
@@ -101,7 +101,9 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
           ) : null}
           {hasContent ? <MarkdownRenderer content={message.content} /> : null}
           {message.status === "error" ? (
-            <p className="text-xs text-rose-500">生成已中断。</p>
+            <p className="rounded-lg bg-destructive/8 px-3 py-2 text-xs text-destructive">
+              回答生成已中断，请重新发送问题。若问题持续出现，请联系管理员检查模型服务。
+            </p>
           ) : null}
           {showFeedback || hasSources || canRecommend ? (
             <div className="flex items-center gap-2">
