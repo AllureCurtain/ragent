@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1.7
+
+# Runtime-only image used on the small cloud host. Build the JARs locally first.
+FROM eclipse-temurin:17-jre-jammy AS java-base
+RUN groupadd --system --gid 10001 ragent \
+    && useradd --system --uid 10001 --gid ragent --home-dir /app --shell /usr/sbin/nologin ragent
+WORKDIR /app
+USER ragent
+
+FROM java-base AS backend
+COPY --chown=ragent:ragent bootstrap/target/bootstrap-*.jar /app/app.jar
+EXPOSE 9090
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+
+FROM java-base AS mcp-server
+COPY --chown=ragent:ragent mcp-server/target/mcp-server-*.jar /app/app.jar
+EXPOSE 9099
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

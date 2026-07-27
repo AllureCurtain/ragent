@@ -43,6 +43,7 @@ dist/
 .vite/
 .env.local
 resources/docker/graphrag/.env
+deploy/cloud/.env
 
 ### Tmp Out ###
 .output/

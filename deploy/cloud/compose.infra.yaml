@@ -1,0 +1,33 @@
+# Redis-only overlay for this cloud host. PostgreSQL, RustFS, and RocketMQ are reused.
+# Usage: docker compose --env-file .env -f compose.yaml -f compose.infra.yaml up -d --build
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD when using compose.infra.yaml}
+    command:
+      - sh
+      - -ec
+      - exec redis-server --appendonly yes --save 60 1000 --maxmemory 64mb --maxmemory-policy allkeys-lru --requirepass "$${REDIS_PASSWORD}"
+    volumes:
+      - redis-data:/data
+    networks:
+      infra:
+        aliases:
+          - redis
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: ${REDIS_MEMORY_LIMIT:-96m}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping 2>/dev/null | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  redis-data:

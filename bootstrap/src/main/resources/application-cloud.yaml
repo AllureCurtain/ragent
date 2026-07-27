@@ -1,0 +1,163 @@
+# Cloud deployment overrides. Activate with SPRING_PROFILES_ACTIVE=cloud.
+# Secrets are supplied through deploy/cloud/.env and must never be committed.
+
+unique-name: ${RAGENT_UNIQUE_NAME:-cloud}
+
+server:
+  shutdown: graceful
+  forward-headers-strategy: framework
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  datasource:
+    url: "jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:ragent}?client_encoding=UTF8"
+    username: "${POSTGRES_USER}"
+    password: "${POSTGRES_PASSWORD}"
+    hikari:
+      connection-timeout: 5000
+      validation-timeout: 3000
+      maximum-pool-size: ${POSTGRES_POOL_MAX_SIZE:10}
+      minimum-idle: ${POSTGRES_POOL_MIN_IDLE:2}
+  data:
+    redis:
+      host: "${REDIS_HOST:redis}"
+      port: ${REDIS_PORT:6379}
+      password: "${REDIS_PASSWORD:}"
+      timeout: 5s
+
+rocketmq:
+  name-server: "${ROCKETMQ_NAME_SERVER:rocketmq-namesrv:9876}"
+  client-api-timeout: 10000
+  producer:
+    group: ragent-producer${unique-name}_pg
+    send-message-timeout: 10000
+
+rag:
+  storage:
+    type: s3
+    kb-bucket: "${RAGENT_SOURCE_BUCKET:ragent-demo-sources}"
+    asset-bucket: "${RAGENT_ASSET_BUCKET:ragent-demo-assets}"
+    s3:
+      endpoint: "${RUSTFS_ENDPOINT:http://rustfs:9000}"
+      access-key: "${RUSTFS_ACCESS_KEY}"
+      secret-key: "${RUSTFS_SECRET_KEY}"
+      region: "${RUSTFS_REGION:us-east-1}"
+      path-style: true
+      public-url: "${RUSTFS_PUBLIC_URL}"
+  vector:
+    type: pg
+  keyword:
+    type: none
+  graph:
+    type: none
+    ingestion:
+      enabled: false
+  mcp:
+    servers:
+      - name: default
+        url: "${MCP_SERVER_URL:http://mcp-server:9099}"
+  search:
+    channels:
+      keyword:
+        enabled: false
+      graph:
+        enabled: false
+      web-search:
+        enabled: false
+        api-key: "${YDC_API_KEY:}"
+  rate-limit:
+    global:
+      enabled: true
+      max-concurrent: ${RAGENT_MAX_CONCURRENT:5}
+      max-wait-seconds: ${RAGENT_MAX_WAIT_SECONDS:15}
+      lease-seconds: 30
+      poll-interval-ms: 200
+
+ai:
+  providers:
+    bailian:
+      api-key: "${BAILIAN_API_KEY}"
+      url: "https://dashscope.aliyuncs.com"
+      endpoints:
+        chat: "/compatible-mode/v1/chat/completions"
+        embedding: "/compatible-mode/v1/embeddings"
+        rerank: "/api/v1/services/rerank/text-rerank/text-rerank"
+    siliconflow:
+      api-key: "${SILICONFLOW_API_KEY}"
+    aihubmix:
+      api-key: "${AIHUBMIX_API_KEY:}"
+    ollama:
+      url: "${OLLAMA_URL:http://127.0.0.1:11434}"
+  chat:
+    candidates:
+      - id: qwen-plus
+        provider: bailian
+        model: qwen-plus-latest
+        priority: 1
+      - id: qwen3-max
+        provider: bailian
+        model: qwen3-max
+        supports-thinking: true
+        priority: 2
+      - id: glm-4.7
+        provider: siliconflow
+        model: Pro/zai-org/GLM-4.7
+        supports-thinking: true
+        priority: 3
+    default-tier: standard
+    deep-thinking-tier: deep
+    tiers:
+      fast:
+        candidates: [ qwen-plus ]
+        timeout-ms: 5000
+      standard:
+        candidates: [ qwen-plus ]
+        timeout-ms: 30000
+      deep:
+        candidates: [ qwen3-max, glm-4.7 ]
+        timeout-ms: 120000
+  embedding:
+    default-model: bailian-text-embedding-v4
+    candidates:
+      - id: bailian-text-embedding-v4
+        provider: bailian
+        model: text-embedding-v4
+        dimension: ${rag.default.dimension}
+        priority: 1
+      - id: qwen-emb-8b
+        provider: siliconflow
+        model: Qwen/Qwen3-Embedding-8B
+        dimension: ${rag.default.dimension}
+        priority: 2
+  rerank:
+    default-model: qwen3-rerank
+    candidates:
+      - id: qwen3-rerank
+        provider: bailian
+        model: qwen3-rerank
+        priority: 1
+      - id: rerank-noop
+        provider: noop
+        model: noop
+        priority: 100
+  vlm:
+    default-model: qwen-vl-max
+    candidates:
+      - id: qwen-vl-max
+        provider: bailian
+        model: qwen-vl-max
+
+mineru:
+  api-key: "${MINERU_API_KEY:}"
+
+app:
+  demo-mode: ${APP_DEMO_MODE:false}
+  eval:
+    enabled: false
+  cors:
+    allowed-origin-patterns: "${RAGENT_PUBLIC_ORIGIN}"
+
+logging:
+  level:
+    root: INFO

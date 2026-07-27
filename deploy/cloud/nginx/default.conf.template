@@ -1,0 +1,57 @@
+map $http_x_forwarded_proto $ragent_forwarded_proto {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
+server {
+    listen 8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+    client_max_body_size 100m;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location ^~ /api/ragent/ {
+        proxy_pass http://${BACKEND_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $ragent_forwarded_proto;
+        proxy_set_header Connection "";
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 310s;
+        proxy_send_timeout 310s;
+    }
+
+    location ^~ /storage/${RAGENT_ASSET_BUCKET}/ {
+        limit_except GET HEAD { deny all; }
+        proxy_pass http://${RUSTFS_UPSTREAM}/${RAGENT_ASSET_BUCKET}/;
+        proxy_set_header Host $proxy_host;
+        proxy_http_version 1.1;
+        proxy_buffering on;
+        expires 1h;
+        add_header Cache-Control "public, max-age=3600" always;
+    }
+
+    location ^~ /storage/ {
+        return 404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

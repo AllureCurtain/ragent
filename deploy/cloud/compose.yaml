@@ -1,0 +1,156 @@
+name: ${COMPOSE_PROJECT_NAME:-ragent-cloud}
+
+x-container-logging: &container-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# The server's Docker client has a desktop-only proxy configured. Explicitly disable it in
+# production containers; host.docker.internal is not resolvable on this Linux host.
+x-direct-network-environment: &direct-network-environment
+  HTTP_PROXY: ""
+  HTTPS_PROXY: ""
+  ALL_PROXY: ""
+  http_proxy: ""
+  https_proxy: ""
+  all_proxy: ""
+  NO_PROXY: "*"
+  no_proxy: "*"
+
+x-backend-environment: &backend-environment
+  SPRING_PROFILES_ACTIVE: cloud
+  LOGGING_CONFIG: file:/app/config/logback-cloud.xml
+  RAGENT_UNIQUE_NAME: ${RAGENT_UNIQUE_NAME:--cloud}
+  RAGENT_PUBLIC_ORIGIN: ${RAGENT_PUBLIC_ORIGIN:?Set RAGENT_PUBLIC_ORIGIN in deploy/cloud/.env}
+  POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+  POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+  POSTGRES_DB: ${POSTGRES_DB:-ragent}
+  POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in deploy/cloud/.env}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/cloud/.env}
+  POSTGRES_POOL_MAX_SIZE: ${POSTGRES_POOL_MAX_SIZE:-5}
+  POSTGRES_POOL_MIN_IDLE: ${POSTGRES_POOL_MIN_IDLE:-1}
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  ROCKETMQ_NAME_SERVER: ${ROCKETMQ_NAME_SERVER:-rmq-namesrv:9876}
+  RUSTFS_ENDPOINT: ${RUSTFS_ENDPOINT:-http://rustfs:9000}
+  RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?Set RUSTFS_ACCESS_KEY in deploy/cloud/.env}
+  RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?Set RUSTFS_SECRET_KEY in deploy/cloud/.env}
+  RUSTFS_REGION: ${RUSTFS_REGION:-us-east-1}
+  RUSTFS_PUBLIC_URL: ${RUSTFS_PUBLIC_URL:?Set RUSTFS_PUBLIC_URL in deploy/cloud/.env}
+  RAGENT_SOURCE_BUCKET: ${RAGENT_SOURCE_BUCKET:-ragent-demo-sources}
+  RAGENT_ASSET_BUCKET: ${RAGENT_ASSET_BUCKET:-ragent-demo-assets}
+  MCP_SERVER_URL: http://mcp-server:9099
+  BAILIAN_API_KEY: ${BAILIAN_API_KEY:?Set BAILIAN_API_KEY in deploy/cloud/.env}
+  SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:?Set SILICONFLOW_API_KEY in deploy/cloud/.env}
+  AIHUBMIX_API_KEY: ${AIHUBMIX_API_KEY:-}
+  MINERU_API_KEY: ${MINERU_API_KEY:-}
+  YDC_API_KEY: ${YDC_API_KEY:-}
+  APP_DEMO_MODE: ${APP_DEMO_MODE:-false}
+  RAGENT_MAX_CONCURRENT: ${RAGENT_MAX_CONCURRENT:-2}
+  RAGENT_MAX_WAIT_SECONDS: ${RAGENT_MAX_WAIT_SECONDS:-15}
+  TZ: ${TZ:-Asia/Shanghai}
+
+services:
+  backend:
+    image: ${RAGENT_BACKEND_IMAGE:-ragent-backend}:${RAGENT_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: ${RAGENT_JAVA_DOCKERFILE:-deploy/cloud/Dockerfile}
+      target: backend
+    environment:
+      <<: [*backend-environment, *direct-network-environment]
+      JAVA_TOOL_OPTIONS: ${BACKEND_JAVA_TOOL_OPTIONS:--Xms128m -Xmx512m -XX:MaxMetaspaceSize=192m -XX:MaxDirectMemorySize=64m -Xss512k -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8} -Drocketmq.log.root=/tmp/rocketmqlogs -Drocketmq.log.file.maxIndex=3
+    expose:
+      - "9090"
+    volumes:
+      - ./logback-cloud.xml:/app/config/logback-cloud.xml:ro
+    networks:
+      - app
+      - infra
+      - rocketmq
+    depends_on:
+      mcp-server:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *container-logging
+    stop_grace_period: 40s
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-768m}
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec '</dev/tcp/127.0.0.1/9090'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 45s
+
+  mcp-server:
+    image: ${RAGENT_MCP_IMAGE:-ragent-mcp-server}:${RAGENT_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: ${RAGENT_JAVA_DOCKERFILE:-deploy/cloud/Dockerfile}
+      target: mcp-server
+    environment:
+      <<: *direct-network-environment
+      JAVA_TOOL_OPTIONS: ${MCP_JAVA_TOOL_OPTIONS:--Xms64m -Xmx160m -XX:MaxMetaspaceSize=128m -XX:MaxDirectMemorySize=32m -Xss512k -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8}
+      YDC_API_KEY: ${YDC_API_KEY:-}
+      TZ: ${TZ:-Asia/Shanghai}
+    expose:
+      - "9099"
+    networks:
+      - app
+    restart: unless-stopped
+    logging: *container-logging
+    stop_grace_period: 20s
+    mem_limit: ${MCP_MEMORY_LIMIT:-256m}
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec '</dev/tcp/127.0.0.1/9099'"]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 25s
+
+  web:
+    image: ${RAGENT_WEB_IMAGE:-ragent-web}:${RAGENT_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: ${RAGENT_FRONTEND_DOCKERFILE:-deploy/cloud/frontend.Dockerfile}
+      args:
+        VITE_API_BASE_URL: /api/ragent
+    environment:
+      <<: *direct-network-environment
+      BACKEND_UPSTREAM: backend:9090
+      RUSTFS_UPSTREAM: ${RUSTFS_UPSTREAM:-rustfs:9000}
+      RAGENT_ASSET_BUCKET: ${RAGENT_ASSET_BUCKET:-ragent-demo-assets}
+    ports:
+      - "${RAGENT_BIND_ADDRESS:-127.0.0.1}:${RAGENT_HTTP_PORT:-19080}:8080"
+    networks:
+      - app
+      - infra
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *container-logging
+    mem_limit: ${WEB_MEMORY_LIMIT:-64m}
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+networks:
+  app:
+    name: ${COMPOSE_PROJECT_NAME:-ragent-cloud}-app
+  infra:
+    external: true
+    name: ${RAGENT_INFRA_NETWORK:-ragent-infra}
+  rocketmq:
+    external: true
+    name: ${ROCKETMQ_NETWORK:-rocketmq_rmq-net}
