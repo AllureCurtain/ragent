@@ -18,7 +18,15 @@ import {
   DialogHeader,
   DialogTitle
 } from "@/components/ui/dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -53,6 +61,7 @@ import {
   getIntentTree,
   updateIntentNode
 } from "@/services/intentTreeService";
+import { KnowledgeBaseMultiSelect } from "./KnowledgeBaseMultiSelect";
 
 const ROOT_PARENT = "__ROOT__";
 
@@ -78,9 +87,8 @@ const formSchema = z.object({
   level: z.number(),
   kind: z.number(),
   parentCode: z.string().optional(),
-  kbId: z.string().optional(),
+  collectionNames: z.array(z.string()),
   mcpToolId: z.string().optional(),
-  collectionName: z.string().optional(),
   description: z.string().optional(),
   examplesText: z.string().optional(),
   topK: z.number().int().positive("TopK 必须大于 0").optional(),
@@ -146,6 +154,16 @@ const findNodeByCode = (nodes: IntentNodeTree[], code: string | null): IntentNod
   return null;
 };
 
+const resolveCollections = (node: {
+  collectionNames?: string[] | null;
+  collectionName?: string | null;
+}) =>
+    node.collectionNames?.length
+        ? node.collectionNames
+        : node.collectionName
+            ? [node.collectionName]
+            : [];
+
 const resolveLevelLabel = (value?: number | null) =>
     LEVEL_OPTIONS.find((option) => option.value === (value ?? 0))?.label ?? "UNKNOWN";
 
@@ -175,6 +193,10 @@ export function IntentTreePage() {
 
   const selectedNode = useMemo(() => findNodeByCode(tree, selectedCode), [tree, selectedCode]);
   const treeOptions = useMemo(() => buildTreeOptions(tree), [tree]);
+  const knowledgeBaseNameMap = useMemo(
+      () => new Map(knowledgeBases.map((kb) => [kb.collectionName, kb.name])),
+      [knowledgeBases]
+  );
 
   const loadTree = async () => {
     setLoading(true);
@@ -401,9 +423,24 @@ export function IntentTreePage() {
                         <span className="text-muted-foreground">排序</span>
                         <span>{selectedNode.sortOrder ?? 0}</span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-muted-foreground">Collection</span>
-                        <span>{selectedNode.collectionName || "-"}</span>
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="shrink-0 text-muted-foreground">知识库</span>
+                        {resolveCollections(selectedNode).length === 0 ? (
+                          <span className="text-muted-foreground">-</span>
+                        ) : (
+                          <div className="flex max-w-[75%] flex-wrap justify-end gap-1">
+                            {resolveCollections(selectedNode).map((collectionName) => (
+                              <Badge
+                                key={collectionName}
+                                variant="secondary"
+                                className="max-w-[12rem] truncate font-normal"
+                                title={collectionName}
+                              >
+                                {knowledgeBaseNameMap.get(collectionName) || collectionName}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">节点 TopK</span>
@@ -505,9 +542,12 @@ function IntentNodeDialog({
         level: node.level ?? 0,
         kind: node.kind ?? 0,
         parentCode: node.parentCode || ROOT_PARENT,
-        kbId: "",
+        collectionNames: node.collectionNames?.length
+          ? node.collectionNames
+          : node.collectionName
+            ? [node.collectionName]
+            : [],
         mcpToolId: node.mcpToolId || "",
-        collectionName: node.collectionName || "",
         description: node.description || "",
         examplesText: parseExamples(node.examples).join("\n"),
         topK: node.topK ?? undefined,
@@ -521,7 +561,6 @@ function IntentNodeDialog({
 
     const nextLevel = parentNode ? Math.min((parentNode.level ?? 0) + 1, 2) : 0;
     const parentKind = parentNode?.kind ?? 0;
-    const kbMatch = knowledgeBases.find((kb) => kb.collectionName === parentNode?.collectionName);
 
     return {
       name: "",
@@ -529,9 +568,8 @@ function IntentNodeDialog({
       level: nextLevel,
       kind: parentKind,
       parentCode: parentNode?.intentCode || ROOT_PARENT,
-      kbId: "",
+      collectionNames: [],
       mcpToolId: "",
-      collectionName: "",
       description: "",
       examplesText: "",
       topK: undefined,
@@ -541,7 +579,7 @@ function IntentNodeDialog({
       promptTemplate: "",
       paramPromptTemplate: ""
     };
-  }, [mode, node, parentNode, knowledgeBases]);
+  }, [mode, node, parentNode]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -570,28 +608,20 @@ function IntentNodeDialog({
             .filter(Boolean)
         : [];
 
-    if (mode === "create") {
-      if (values.kind === 0 && values.level === 2 && !values.kbId) {
-        form.setError("kbId", { message: "TOPIC 节点请选择知识库" });
-        return;
-      }
-      if (values.kind === 2 && !values.mcpToolId?.trim()) {
-        form.setError("mcpToolId", { message: "请输入MCP工具ID" });
-        return;
-      }
-    } else {
-      // 编辑模式下也需要验证MCP工具ID
-      if (values.kind === 2 && !values.mcpToolId?.trim()) {
-        form.setError("mcpToolId", { message: "MCP节点必须填写工具ID" });
-        return;
-      }
+    if (values.kind === 0 && values.level === 2 && values.collectionNames.length === 0) {
+      form.setError("collectionNames", { message: "TOPIC 节点请至少选择一个知识库" });
+      return;
+    }
+    if (values.kind === 2 && !values.mcpToolId?.trim()) {
+      form.setError("mcpToolId", { message: "MCP节点必须填写工具ID" });
+      return;
     }
 
     setSaving(true);
     try {
       if (mode === "create") {
         const payload: IntentNodeCreatePayload = {
-          kbId: values.kind === 0 ? values.kbId : undefined,
+          collectionNames: values.kind === 0 ? values.collectionNames : [],
           intentCode: values.intentCode.trim(),
           name: values.name.trim(),
           level: values.level,
@@ -615,7 +645,7 @@ function IntentNodeDialog({
           parentCode,
           description: values.description?.trim() || undefined,
           examples: examples.length > 0 ? examples : undefined,
-          collectionName: values.kind === 0 ? values.collectionName?.trim() || undefined : undefined,
+          collectionNames: values.kind === 0 ? values.collectionNames : [],
           mcpToolId: values.kind === 2 ? values.mcpToolId?.trim() || undefined : undefined,
           kind: values.kind,
           topK: values.topK ?? undefined,
@@ -763,43 +793,25 @@ function IntentNodeDialog({
                   )}
               />
 
-              {mode === "create" && kind === 0 && (
+              {kind === 0 && (
                   <FormField
                       control={form.control}
-                      name="kbId"
+                      name="collectionNames"
                       render={({ field }) => (
                           <FormItem>
-                            <FormLabel>知识库{form.watch("level") === 2 ? "（必填）" : "（可选）"}</FormLabel>
-                            <Select value={field.value} onValueChange={field.onChange}>
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="请选择知识库" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {knowledgeBases.map((kb) => (
-                                    <SelectItem key={kb.id} value={kb.id}>
-                                      {kb.name} ({kb.collectionName})
-                                    </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                      )}
-                  />
-              )}
-
-              {mode === "edit" && kind === 0 && (
-                  <FormField
-                      control={form.control}
-                      name="collectionName"
-                      render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Collection 名称</FormLabel>
+                            <FormLabel>
+                              知识库{form.watch("level") === 2 ? "（至少选择一个）" : "（可选）"}
+                            </FormLabel>
                             <FormControl>
-                              <Input placeholder="向量数据库 Collection 名称" {...field} />
+                              <KnowledgeBaseMultiSelect
+                                knowledgeBases={knowledgeBases}
+                                value={field.value}
+                                onChange={field.onChange}
+                              />
                             </FormControl>
+                            <FormDescription>
+                              可选择多个知识库，检索时统一排序，节点 TopK 为总返回上限
+                            </FormDescription>
                             <FormMessage />
                           </FormItem>
                       )}

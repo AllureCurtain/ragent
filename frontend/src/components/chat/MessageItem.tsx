@@ -3,6 +3,8 @@ import { Brain, ChevronDown } from "lucide-react";
 
 import { FeedbackButtons } from "@/components/chat/FeedbackButtons";
 import { MarkdownRenderer } from "@/components/chat/MarkdownRenderer";
+import { RecommendedQuestions } from "@/components/chat/RecommendedQuestions";
+import { RecommendedQuestionsButton } from "@/components/chat/RecommendedQuestionsButton";
 import { SourcesButton } from "@/components/chat/SourcesButton";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { cn } from "@/lib/utils";
@@ -24,6 +26,13 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
     message.role === "assistant" &&
     message.status !== "streaming" &&
     (message.sources?.length ?? 0) > 0;
+  // 推荐追问：完成态且已落库的助手消息（真实 messageId）方可触发 与反馈按钮判据一致
+  const canRecommend =
+    message.role === "assistant" &&
+    message.status !== "streaming" &&
+    Boolean(message.id) &&
+    (message.messageStatus ?? "NORMAL") === "NORMAL" &&
+    !message.id.startsWith("assistant-");
   const [thinkingExpanded, setThinkingExpanded] = React.useState(false);
   const hasThinking = Boolean(message.thinking && message.thinking.trim().length > 0);
   const hasContent = message.content.trim().length > 0;
@@ -94,7 +103,7 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
           {message.status === "error" ? (
             <p className="text-xs text-rose-500">生成已中断。</p>
           ) : null}
-          {showFeedback || hasSources ? (
+          {showFeedback || hasSources || canRecommend ? (
             <div className="flex items-center gap-2">
               {showFeedback ? (
                 <FeedbackButtons
@@ -107,8 +116,10 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
               {hasSources ? (
                 <SourcesButton messageId={message.id} sources={message.sources!} />
               ) : null}
+              {canRecommend ? <RecommendedQuestionsButton message={message} /> : null}
             </div>
           ) : null}
+          {canRecommend ? <RecommendedQuestions message={message} /> : null}
         </div>
       </div>
     </div>

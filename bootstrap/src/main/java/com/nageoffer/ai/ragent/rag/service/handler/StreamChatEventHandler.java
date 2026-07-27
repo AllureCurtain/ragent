@@ -26,6 +26,7 @@ import com.nageoffer.ai.ragent.rag.dto.MetaPayload;
 import com.nageoffer.ai.ragent.rag.enums.SSEEventType;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
+import com.nageoffer.ai.ragent.framework.convention.GroundingChunk;
 import com.nageoffer.ai.ragent.framework.convention.SourceRef;
 import com.nageoffer.ai.ragent.framework.web.SseEmitterSender;
 import com.nageoffer.ai.ragent.infra.chat.StreamCallback;
@@ -57,6 +58,8 @@ public class StreamChatEventHandler implements StreamCallback {
     private long thinkingStartMs;
     private int thinkingDurationSeconds;
     private List<SourceRef> sources;
+    private List<GroundingChunk> groundingChunks;
+    private String replyToMessageId;
 
     /**
      * 使用参数对象构造（推荐）
@@ -119,13 +122,22 @@ public class StreamChatEventHandler implements StreamCallback {
                 String thinkingContent = thinking.isEmpty() ? null : thinking.toString();
                 ChatMessage message = ChatMessage.assistant(content, thinkingContent, resolveThinkingDuration());
                 message.setSources(sources);
+                message.setRetrievedChunks(groundingChunks);
+                message.setReplyToMessageId(replyToMessageId);
+                message.setMessageStatus(ChatMessage.MessageStatus.INTERRUPTED);
                 messageId = memoryService.append(conversationId, userId, message);
             } catch (Exception e) {
                 log.error("取消时持久化消息失败，conversationId：{}", conversationId, e);
             }
         }
         String title = resolveTitleForEvent();
-        return new CompletionPayload(String.valueOf(messageId), title, sources);
+        String messageIdText = StrUtil.isBlank(messageId) ? null : messageId;
+        return new CompletionPayload(messageIdText, title, sources, ChatMessage.MessageStatus.INTERRUPTED);
+    }
+
+    @Override
+    public void onReplyToMessageId(String messageId) {
+        this.replyToMessageId = messageId;
     }
 
     @Override
@@ -138,6 +150,18 @@ public class StreamChatEventHandler implements StreamCallback {
         }
         // 暂存来源 随完成事件（finish）一并下发并落库
         this.sources = sources;
+    }
+
+    @Override
+    public void onGroundingChunks(List<GroundingChunk> chunks) {
+        if (taskManager.isCancelled(taskId)) {
+            return;
+        }
+        if (CollUtil.isEmpty(chunks)) {
+            return;
+        }
+        // 暂存 grounding 片段 随 assistant 消息一并落库 供后续推荐追问生成 grounding
+        this.groundingChunks = chunks;
     }
 
     @Override
@@ -180,13 +204,17 @@ public class StreamChatEventHandler implements StreamCallback {
             String thinkingContent = thinking.isEmpty() ? null : thinking.toString();
             ChatMessage message = ChatMessage.assistant(answer.toString(), thinkingContent, resolveThinkingDuration());
             message.setSources(sources);
+            message.setRetrievedChunks(groundingChunks);
+            message.setReplyToMessageId(replyToMessageId);
+            message.setMessageStatus(ChatMessage.MessageStatus.NORMAL);
             messageId = memoryService.append(conversationId, userId, message);
         } catch (Exception e) {
             log.error("对话完成时持久化消息失败，conversationId：{}", conversationId, e);
         }
         String title = resolveTitleForEvent();
         String messageIdText = StrUtil.isBlank(messageId) ? null : messageId;
-        sender.sendEvent(SSEEventType.FINISH.value(), new CompletionPayload(messageIdText, title, sources));
+        sender.sendEvent(SSEEventType.FINISH.value(),
+                new CompletionPayload(messageIdText, title, sources, ChatMessage.MessageStatus.NORMAL));
         sender.sendEvent(SSEEventType.DONE.value(), "[DONE]");
         taskManager.unregister(taskId);
         sender.complete();

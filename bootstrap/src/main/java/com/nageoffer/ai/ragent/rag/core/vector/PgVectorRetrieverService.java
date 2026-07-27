@@ -46,8 +46,12 @@ public class PgVectorRetrieverService implements VectorRetrieverService {
 
     @Override
     public List<RetrievedChunk> retrieveByVector(float[] vector, RetrieveRequest request) {
-        // 单库检索：按 collection_name 列过滤，走 btree 索引
-        return queryByCollections(vector, List.of(request.getCollectionName()), request.getTopK());
+        List<String> collectionNames = request.getEffectiveCollectionNames();
+        if (collectionNames.isEmpty()) {
+            return List.of();
+        }
+        // 单个或多个逻辑库都通过一条 SQL 过滤，LIMIT 是整个范围的总 TopK
+        return queryByCollections(vector, collectionNames, request.getTopK());
     }
 
     @Override

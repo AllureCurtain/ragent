@@ -128,7 +128,9 @@ public class VectorSearchChannel implements SearchChannel {
         List<NodeScore> allScores = context.getIntents().stream()
                 .flatMap(si -> si.nodeScores().stream())
                 .toList();
-        return NodeScoreFilters.kb(allScores, minScore);
+        return NodeScoreFilters.kb(allScores, minScore).stream()
+                .filter(nodeScore -> !nodeScore.getNode().getEffectiveCollectionNames().isEmpty())
+                .toList();
     }
 
     /**
@@ -161,7 +163,8 @@ public class VectorSearchChannel implements SearchChannel {
     }
 
     /**
-     * 意图作用域：并行检索命中库（每库按 recallBudget 召回，node.topK 可覆盖为该意图绝对深度）
+     * 意图作用域：并行检索命中意图；单个意图下的全部 Collection 共享一个召回预算
+     * （node.topK 可覆盖为该意图的绝对总深度）
      */
     private List<RetrievedChunk> retrieveByIntent(SearchContext context, List<NodeScore> kbIntents) {
         log.info("执行向量检索（意图作用域），命中 {} 个 KB 意图，问题：{}", kbIntents.size(), context.getMainQuestion());

@@ -36,6 +36,7 @@ public class IntentNodeUpdateRequest {
     private String description;
     private List<String> examples;
     private String collectionName;
+    private List<String> collectionNames;
     private Integer topK;
     private Integer kind;
     private Integer sortOrder;

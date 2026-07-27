@@ -56,10 +56,8 @@ public class MilvusVectorRetrieverService implements VectorRetrieverService {
 
     @Override
     public List<RetrievedChunk> retrieveByVector(float[] vector, RetrieveRequest retrieveParam) {
-        // 单库/意图检索：在共享 collection 内按 collection_name 过滤；为空则检索全共享库
-        String filter = StrUtil.isBlank(retrieveParam.getCollectionName())
-                ? null
-                : "collection_name == \"" + retrieveParam.getCollectionName() + "\"";
+        // 单个或多个逻辑库都在共享物理 Collection 中一次过滤，topK 是整个过滤范围的总预算
+        String filter = buildCollectionFilter(retrieveParam.getEffectiveCollectionNames());
         return searchShared(vector, filter, retrieveParam.getTopK());
     }
 
@@ -75,11 +73,26 @@ public class MilvusVectorRetrieverService implements VectorRetrieverService {
         }
         float[] norm = normalize(toArray(embeddingService.embed(query)));
         // 全局检索：单次在共享 collection 内按 collection_name in [...] 跨库召回，替代逐库 fan-out
-        String inList = collectionNames.stream()
-                .map(c -> "\"" + c + "\"")
-                .collect(Collectors.joining(", "));
-        String filter = "collection_name in [" + inList + "]";
+        String filter = buildCollectionFilter(collectionNames);
         return searchShared(norm, filter, candidateBudget);
+    }
+
+    private String buildCollectionFilter(List<String> collectionNames) {
+        if (collectionNames == null || collectionNames.isEmpty()) {
+            return null;
+        }
+        if (collectionNames.size() == 1) {
+            return "collection_name == \"" + escapeFilterValue(collectionNames.get(0)) + "\"";
+        }
+        String inList = collectionNames.stream()
+                .map(this::escapeFilterValue)
+                .map(value -> "\"" + value + "\"")
+                .collect(Collectors.joining(", "));
+        return "collection_name in [" + inList + "]";
+    }
+
+    private String escapeFilterValue(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     /**

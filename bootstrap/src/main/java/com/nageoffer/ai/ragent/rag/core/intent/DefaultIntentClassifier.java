@@ -138,6 +138,10 @@ public class DefaultIntentClassifier implements IntentClassifier, IntentNodeRegi
     public List<NodeScore> classifyTargets(String question) {
         // 每次都从Redis读取最新数据
         IntentTreeData data = loadIntentTreeData();
+        if (data.leafNodes.isEmpty()) {
+            log.debug("意图树没有可用叶子节点，跳过 LLM 意图识别");
+            return List.of();
+        }
 
         String systemPrompt = buildPrompt(data.leafNodes);
         ChatRequest request = ChatRequest.builder()
@@ -291,6 +295,13 @@ public class DefaultIntentClassifier implements IntentClassifier, IntentNodeRegi
             node.setParentId(each.getParentCode());
             node.setMcpToolId(each.getMcpToolId());
             node.setParamPromptTemplate(each.getParamPromptTemplate());
+            if (CollUtil.isEmpty(each.getCollectionNames())) {
+                node.setCollectionNames(
+                        each.getCollectionName() == null || each.getCollectionName().isBlank()
+                                ? List.of()
+                                : List.of(each.getCollectionName())
+                );
+            }
             // 确保 children 不为 null（避免后面 add NPE）
             if (node.getChildren() == null) {
                 node.setChildren(new ArrayList<>());

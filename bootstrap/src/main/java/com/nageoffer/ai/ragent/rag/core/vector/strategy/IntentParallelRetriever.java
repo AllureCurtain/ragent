@@ -22,7 +22,6 @@ import com.nageoffer.ai.ragent.rag.core.intent.IntentNode;
 import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
 import com.nageoffer.ai.ragent.rag.core.retrieval.RetrieveRequest;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorRetrieverService;
-import com.nageoffer.ai.ragent.rag.core.vector.strategy.AbstractParallelRetriever;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -66,17 +65,21 @@ public class IntentParallelRetriever extends AbstractParallelRetriever<IntentPar
     protected List<RetrievedChunk> createRetrievalTask(String question, IntentTask task, int ignoredTopK) {
         NodeScore nodeScore = task.nodeScore();
         IntentNode node = nodeScore.getNode();
+        List<String> collectionNames = node.getEffectiveCollectionNames();
+        if (collectionNames.isEmpty()) {
+            return List.of();
+        }
         try {
             return retrieverService.retrieve(
                     RetrieveRequest.builder()
-                            .collectionName(node.getCollectionName())
+                            .collectionNames(collectionNames)
                             .query(question)
                             .topK(task.intentTopK())
                             .build()
             );
         } catch (Exception e) {
-            log.error("意图检索失败 - 意图ID: {}, 意图名称: {}, Collection: {}, 错误: {}",
-                    node.getId(), node.getName(), node.getCollectionName(), e.getMessage(), e);
+            log.error("意图检索失败 - 意图ID: {}, 意图名称: {}, Collections: {}, 错误: {}",
+                    node.getId(), node.getName(), collectionNames, e.getMessage(), e);
             return List.of();
         }
     }

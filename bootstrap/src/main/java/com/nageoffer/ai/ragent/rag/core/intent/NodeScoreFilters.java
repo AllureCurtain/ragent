@@ -69,8 +69,7 @@ public final class NodeScoreFilters {
      */
     public static List<String> kbCollections(List<NodeScore> scores) {
         return kb(scores).stream()
-                .map(ns -> ns.getNode().getCollectionName())
-                .filter(StrUtil::isNotBlank)
+                .flatMap(ns -> ns.getNode().getEffectiveCollectionNames().stream())
                 .distinct()
                 .toList();
     }

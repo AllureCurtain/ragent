@@ -17,12 +17,14 @@
 
 package com.nageoffer.ai.ragent.rag.core.intent;
 
+import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.rag.enums.IntentKind;
 import com.nageoffer.ai.ragent.rag.enums.IntentLevel;
 import lombok.Builder;
 import lombok.Data;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 
 @Data
@@ -94,8 +96,15 @@ public class IntentNode {
 
     /**
      * Milvus Collection 名称（仅对 kind=KB 有意义）
+     * 仅用于兼容旧缓存和旧数据
      */
     private String collectionName;
+
+    /**
+     * 一个 KB 意图可关联多个逻辑 Collection
+     */
+    @Builder.Default
+    private List<String> collectionNames = new ArrayList<>();
 
     /**
      * MCP 工具 ID（仅对 kind=MCP 有意义）
@@ -152,5 +161,24 @@ public class IntentNode {
      */
     public boolean isSystem() {
         return kind == IntentKind.SYSTEM;
+    }
+
+    /**
+     * 返回当前意图实际参与检索的 Collection
+     * 新字段优先，旧的单 Collection 字段仅作平滑升级兜底
+     */
+    public List<String> getEffectiveCollectionNames() {
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        if (collectionNames != null) {
+            collectionNames.stream()
+                    .filter(java.util.Objects::nonNull)
+                    .map(String::trim)
+                    .filter(value -> !value.isEmpty())
+                    .forEach(normalized::add);
+        }
+        if (normalized.isEmpty() && StrUtil.isNotBlank(collectionName)) {
+            normalized.add(collectionName.trim());
+        }
+        return List.copyOf(normalized);
     }
 }

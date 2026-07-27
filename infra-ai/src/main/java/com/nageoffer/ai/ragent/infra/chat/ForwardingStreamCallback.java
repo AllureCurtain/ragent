@@ -17,6 +17,7 @@
 
 package com.nageoffer.ai.ragent.infra.chat;
 
+import com.nageoffer.ai.ragent.framework.convention.GroundingChunk;
 import com.nageoffer.ai.ragent.framework.convention.SourceRef;
 
 import java.util.List;
@@ -56,8 +57,18 @@ public abstract class ForwardingStreamCallback implements StreamCallback {
     }
 
     @Override
+    public final void onReplyToMessageId(String messageId) {
+        delegate.onReplyToMessageId(messageId);
+    }
+
+    @Override
     public final void onSources(List<SourceRef> sources) {
         delegate.onSources(sources);
+    }
+
+    @Override
+    public final void onGroundingChunks(List<GroundingChunk> chunks) {
+        delegate.onGroundingChunks(chunks);
     }
 
     /**

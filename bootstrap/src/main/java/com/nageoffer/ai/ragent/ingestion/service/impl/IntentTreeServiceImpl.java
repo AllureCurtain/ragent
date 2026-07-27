@@ -27,6 +27,7 @@ import com.mzt.logapi.starter.annotation.LogRecord;
 import com.nageoffer.ai.ragent.audit.constant.BizChangeBizType;
 import com.nageoffer.ai.ragent.audit.constant.BizChangeOperationType;
 import com.nageoffer.ai.ragent.audit.support.BizChangeLogContext;
+import com.nageoffer.ai.ragent.knowledge.dao.entity.KnowledgeBaseDO;
 import com.nageoffer.ai.ragent.rag.controller.request.IntentNodeCreateRequest;
 import com.nageoffer.ai.ragent.rag.controller.request.IntentNodeUpdateRequest;
 import com.nageoffer.ai.ragent.rag.controller.vo.IntentNodeTreeVO;
@@ -51,12 +52,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
-
 
 @Service
 @RequiredArgsConstructor
@@ -95,6 +96,7 @@ public class IntentTreeServiceImpl extends ServiceImpl<IntentNodeMapper, IntentN
     private IntentNodeTreeVO buildTree(IntentNodeDO current,
                                        Map<String, List<IntentNodeDO>> parentMap) {
         IntentNodeTreeVO result = BeanUtil.toBean(current, IntentNodeTreeVO.class);
+        result.setCollectionNames(effectiveCollectionNames(current));
         List<IntentNodeDO> children = parentMap.getOrDefault(current.getIntentCode(), Collections.emptyList());
 
         if (!CollectionUtils.isEmpty(children)) {
@@ -127,20 +129,21 @@ public class IntentTreeServiceImpl extends ServiceImpl<IntentNodeMapper, IntentN
             throw new ClientException("意图标识已存在: " + requestParam.getIntentCode());
         }
 
+        int kind = requestParam.getKind() == null ? IntentKind.KB.getCode() : requestParam.getKind();
+        CollectionBinding collectionBinding = Objects.equals(kind, IntentKind.KB.getCode())
+                ? resolveCreateCollectionBinding(requestParam)
+                : CollectionBinding.empty();
         if (Objects.equals(requestParam.getLevel(), IntentLevel.TOPIC.getCode())
-                && Objects.equals(requestParam.getKind(), IntentKind.KB.getCode())
-                && StrUtil.isBlank(requestParam.getKbId())) {
-            throw new ClientException("TOPIC级别的RAG检索节点必须指定目标知识库");
+                && Objects.equals(kind, IntentKind.KB.getCode())
+                && collectionBinding.collectionNames().isEmpty()) {
+            throw new ClientException("TOPIC级别的RAG检索节点必须至少指定一个目标知识库");
         }
 
         IntentNodeDO node = IntentNodeDO.builder()
                 .intentCode(requestParam.getIntentCode())
-                .kbId(
-                        StrUtil.isNotBlank(requestParam.getKbId()) ? requestParam.getKbId() : null
-                )
-                .collectionName(
-                        StrUtil.isNotBlank(requestParam.getKbId()) ? knowledgeBaseMapper.selectById(requestParam.getKbId()).getCollectionName() : null
-                )
+                .kbId(collectionBinding.primaryKbId())
+                .collectionName(firstOrNull(collectionBinding.collectionNames()))
+                .collectionNames(collectionBinding.collectionNames())
                 .name(requestParam.getName())
                 .level(requestParam.getLevel())
                 .parentCode(requestParam.getParentCode())
@@ -150,9 +153,7 @@ public class IntentTreeServiceImpl extends ServiceImpl<IntentNodeMapper, IntentN
                         requestParam.getExamples() == null ? null : GSON.toJson(requestParam.getExamples())
                 )
                 .topK(normalizeTopK(requestParam.getTopK()))
-                .kind(
-                        requestParam.getKind() == null ? 0 : requestParam.getKind()
-                )
+                .kind(kind)
                 .sortOrder(
                         requestParam.getSortOrder() == null ? 0 : requestParam.getSortOrder()
                 )
@@ -208,14 +209,31 @@ public class IntentTreeServiceImpl extends ServiceImpl<IntentNodeMapper, IntentN
         if (req.getExamples() != null) {
             node.setExamples(GSON.toJson(req.getExamples()));
         }
-        if (req.getCollectionName() != null) {
-            node.setCollectionName(req.getCollectionName());
+
+        CollectionBinding collectionBinding = null;
+        if (req.getCollectionNames() != null) {
+            collectionBinding = resolveCollectionBinding(req.getCollectionNames());
+        } else if (req.getCollectionName() != null) {
+            collectionBinding = resolveCollectionBinding(
+                    StrUtil.isBlank(req.getCollectionName()) ? List.of() : List.of(req.getCollectionName())
+            );
+        }
+        if (collectionBinding != null) {
+            applyCollectionBinding(node, collectionBinding);
         }
         if (req.getTopK() != null) {
             node.setTopK(normalizeTopK(req.getTopK()));
         }
         if (req.getKind() != null) {
             node.setKind(req.getKind());
+        }
+        if (!Objects.equals(node.getKind(), IntentKind.KB.getCode())) {
+            applyCollectionBinding(node, CollectionBinding.empty());
+        }
+        if (Objects.equals(node.getKind(), IntentKind.KB.getCode())
+                && Objects.equals(node.getLevel(), IntentLevel.TOPIC.getCode())
+                && effectiveCollectionNames(node).isEmpty()) {
+            throw new ClientException("TOPIC级别的RAG检索节点必须至少指定一个目标知识库");
         }
         if (req.getSortOrder() != null) {
             node.setSortOrder(req.getSortOrder());
@@ -477,6 +495,91 @@ public class IntentTreeServiceImpl extends ServiceImpl<IntentNodeMapper, IntentN
             throw new ClientException("节点级 TopK 必须大于 0");
         }
         return topK;
+    }
+
+    /**
+     * 创建接口兼容旧的 kbId，同时将新的 collectionNames 作为明确的优先输入
+     */
+    private CollectionBinding resolveCreateCollectionBinding(IntentNodeCreateRequest request) {
+        if (request.getCollectionNames() != null) {
+            return resolveCollectionBinding(request.getCollectionNames());
+        }
+        if (StrUtil.isBlank(request.getKbId())) {
+            return CollectionBinding.empty();
+        }
+        KnowledgeBaseDO knowledgeBase = knowledgeBaseMapper.selectById(request.getKbId());
+        if (knowledgeBase == null || Objects.equals(knowledgeBase.getDeleted(), 1)) {
+            throw new ClientException("知识库不存在或已删除: " + request.getKbId());
+        }
+        return new CollectionBinding(List.of(knowledgeBase.getCollectionName()), knowledgeBase.getId());
+    }
+
+    /**
+     * 校验 Collection 均来自有效知识库，并保持前端选择顺序
+     */
+    private CollectionBinding resolveCollectionBinding(List<String> requestedCollectionNames) {
+        List<String> collectionNames = normalizeCollectionNames(requestedCollectionNames);
+        if (collectionNames.isEmpty()) {
+            return CollectionBinding.empty();
+        }
+
+        List<KnowledgeBaseDO> knowledgeBases = knowledgeBaseMapper.selectList(
+                new LambdaQueryWrapper<KnowledgeBaseDO>()
+                        .in(KnowledgeBaseDO::getCollectionName, collectionNames)
+                        .eq(KnowledgeBaseDO::getDeleted, 0)
+        );
+        Map<String, KnowledgeBaseDO> byCollectionName = knowledgeBases.stream()
+                .collect(Collectors.toMap(KnowledgeBaseDO::getCollectionName, item -> item));
+        List<String> missing = collectionNames.stream()
+                .filter(collectionName -> !byCollectionName.containsKey(collectionName))
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new ClientException("知识库 Collection 不存在或已删除: " + missing);
+        }
+
+        return new CollectionBinding(
+                collectionNames,
+                byCollectionName.get(collectionNames.get(0)).getId()
+        );
+    }
+
+    private List<String> normalizeCollectionNames(List<String> collectionNames) {
+        if (collectionNames == null) {
+            return List.of();
+        }
+        LinkedHashSet<String> normalized = collectionNames.stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(StrUtil::isNotBlank)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return List.copyOf(normalized);
+    }
+
+    private void applyCollectionBinding(IntentNodeDO node, CollectionBinding binding) {
+        node.setCollectionNames(binding.collectionNames());
+        node.setCollectionName(firstOrNull(binding.collectionNames()));
+        node.setKbId(binding.primaryKbId());
+    }
+
+    private List<String> effectiveCollectionNames(IntentNodeDO node) {
+        if (CollectionUtils.isNotEmpty(node.getCollectionNames())) {
+            return normalizeCollectionNames(node.getCollectionNames());
+        }
+        if (StrUtil.isNotBlank(node.getCollectionName())) {
+            return List.of(node.getCollectionName().trim());
+        }
+        return List.of();
+    }
+
+    private String firstOrNull(List<String> values) {
+        return CollectionUtils.isEmpty(values) ? null : values.get(0);
+    }
+
+    private record CollectionBinding(List<String> collectionNames, String primaryKbId) {
+
+        private static CollectionBinding empty() {
+            return new CollectionBinding(List.of(), null);
+        }
     }
 
     private List<IntentNodeDO> listAndValidateTargetNodes(List<String> ids) {

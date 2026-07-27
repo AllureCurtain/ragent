@@ -72,7 +72,11 @@ CREATE TABLE t_message (
     content           TEXT        NOT NULL,
     thinking_content  TEXT,
     thinking_duration INTEGER,
-    sources           JSONB,
+    sources              JSONB,
+    recommended_questions JSONB,
+    retrieved_chunks  JSONB,
+    reply_to_message_id VARCHAR(20),
+    message_status    VARCHAR(16) NOT NULL DEFAULT 'NORMAL',
     create_time       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     update_time       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted           SMALLINT    DEFAULT 0
@@ -302,6 +306,7 @@ CREATE TABLE t_intent_node (
     description           VARCHAR(512),
     examples              TEXT,
     collection_name       VARCHAR(128),
+    collection_names      JSONB        NOT NULL DEFAULT '[]'::jsonb,
     top_k                 INTEGER,
     mcp_tool_id           VARCHAR(128),
     kind                  SMALLINT     NOT NULL DEFAULT 0,
@@ -507,6 +512,10 @@ COMMENT ON COLUMN t_message.content IS '消息内容';
 COMMENT ON COLUMN t_message.thinking_content IS '深度思考内容';
 COMMENT ON COLUMN t_message.thinking_duration IS '深度思考耗时（秒）';
 COMMENT ON COLUMN t_message.sources IS '回答来源';
+COMMENT ON COLUMN t_message.recommended_questions IS '推荐追问问题';
+COMMENT ON COLUMN t_message.retrieved_chunks IS '推荐问题 grounding 片段';
+COMMENT ON COLUMN t_message.reply_to_message_id IS '当前助手消息对应的用户消息ID';
+COMMENT ON COLUMN t_message.message_status IS '消息结束状态：NORMAL=正常完成，INTERRUPTED=用户中断，REJECTED=限流拒绝';
 COMMENT ON COLUMN t_message.create_time IS '创建时间';
 COMMENT ON COLUMN t_message.update_time IS '更新时间';
 COMMENT ON COLUMN t_message.deleted IS '是否删除 0：正常 1：删除';
@@ -647,7 +656,8 @@ COMMENT ON COLUMN t_intent_node.level IS '层级 0：DOMAIN 1：CATEGORY 2：TOP
 COMMENT ON COLUMN t_intent_node.parent_code IS '父节点标识';
 COMMENT ON COLUMN t_intent_node.description IS '语义描述';
 COMMENT ON COLUMN t_intent_node.examples IS '示例问题';
-COMMENT ON COLUMN t_intent_node.collection_name IS '关联的Collection名称';
+COMMENT ON COLUMN t_intent_node.collection_name IS '兼容旧版本，后续删除';
+COMMENT ON COLUMN t_intent_node.collection_names IS '知识库Collection集合';
 COMMENT ON COLUMN t_intent_node.top_k IS '知识库检索TopK';
 COMMENT ON COLUMN t_intent_node.mcp_tool_id IS 'MCP工具ID';
 COMMENT ON COLUMN t_intent_node.kind IS '类型 0：RAG知识库类 1：SYSTEM系统交互类';

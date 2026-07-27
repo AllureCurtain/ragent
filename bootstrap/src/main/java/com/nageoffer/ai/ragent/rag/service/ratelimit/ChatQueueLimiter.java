@@ -18,6 +18,7 @@
 package com.nageoffer.ai.ragent.rag.service.ratelimit;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.alibaba.ttl.TtlRunnable;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
@@ -73,8 +74,8 @@ public class ChatQueueLimiter {
 
         chatRateLimiter.acquire(AcquireRequest.builder()
                 .maxWaitMillis(TimeUnit.SECONDS.toMillis(rateLimitProperties.getGlobalMaxWaitSeconds()))
-                .onAcquired(onAcquire)
-                .onTimeout(() -> handleReject(question, conversationId, emitter))
+                .onAcquired(TtlRunnable.get(onAcquire))
+                .onTimeout(TtlRunnable.get(() -> handleReject(question, conversationId, emitter)))
                 .onAcquiredExecutor(chatEntryExecutor)
                 .cancelBinder(cancel -> {
                     emitter.onCompletion(cancel);
@@ -113,8 +114,11 @@ public class ChatQueueLimiter {
             isNewConversation = conversationGroupService.findConversation(actualConversationId, userId) == null;
         }
 
-        memoryService.append(actualConversationId, userId, ChatMessage.user(question));
-        String messageId = memoryService.append(actualConversationId, userId, ChatMessage.assistant(REJECT_MESSAGE));
+        String questionMessageId = memoryService.append(actualConversationId, userId, ChatMessage.user(question));
+        ChatMessage rejectedMessage = ChatMessage.assistant(REJECT_MESSAGE);
+        rejectedMessage.setReplyToMessageId(questionMessageId);
+        rejectedMessage.setMessageStatus(ChatMessage.MessageStatus.REJECTED);
+        String messageId = memoryService.append(actualConversationId, userId, rejectedMessage);
 
         String title = Strings.EMPTY;
         if (isNewConversation) {
@@ -144,7 +148,8 @@ public class ChatQueueLimiter {
             sender.sendEvent(SSEEventType.META.value(), new MetaPayload(rejectedContext.conversationId, rejectedContext.taskId));
             sender.sendEvent(SSEEventType.REJECT.value(), new MessageDelta(RESPONSE_TYPE, REJECT_MESSAGE));
             sender.sendEvent(SSEEventType.FINISH.value(),
-                    new CompletionPayload(String.valueOf(rejectedContext.messageId), rejectedContext.title));
+                    new CompletionPayload(String.valueOf(rejectedContext.messageId), rejectedContext.title,
+                            null, ChatMessage.MessageStatus.REJECTED));
         }
         sender.sendEvent(SSEEventType.DONE.value(), "[DONE]");
         sender.complete();

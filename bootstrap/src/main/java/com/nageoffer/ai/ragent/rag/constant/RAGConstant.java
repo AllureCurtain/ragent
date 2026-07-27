@@ -133,6 +133,12 @@ public class RAGConstant {
      */
     public static final String MCP_KB_MIXED_PROMPT_PATH = "prompt/answer-chat-mcp-kb-mixed.st";
 
+    /**
+     * 推荐追问问题生成提示词模板路径
+     * 通过 {@code {question}}、{@code {answer}}、{@code {count}} 注入问答与生成数量
+     */
+    public static final String RECOMMENDED_QUESTIONS_PROMPT_PATH = "prompt/recommended-questions.st";
+
     // ==================== 上下文格式化模板（单文件多 section） ====================
 
     /**
