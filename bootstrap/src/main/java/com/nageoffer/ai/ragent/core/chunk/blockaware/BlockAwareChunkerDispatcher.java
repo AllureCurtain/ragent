@@ -17,88 +17,78 @@
 
 package com.nageoffer.ai.ragent.core.chunk.blockaware;
 
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.Chunk;
+import com.nageoffer.ai.ragent.core.chunk.model.ChunkAssembler;
+import com.nageoffer.ai.ragent.core.chunk.model.ChunkBudget;
+import com.nageoffer.ai.ragent.core.chunk.model.ChunkDraft;
 import com.nageoffer.ai.ragent.core.parser.model.Block;
-import com.nageoffer.ai.ragent.core.parser.model.CodeBlock;
 import com.nageoffer.ai.ragent.core.parser.model.HeadingBlock;
-import com.nageoffer.ai.ragent.core.parser.model.ImageBlock;
-import com.nageoffer.ai.ragent.core.parser.model.ListBlock;
-import com.nageoffer.ai.ragent.core.parser.model.ParagraphBlock;
-import com.nageoffer.ai.ragent.core.parser.model.TableBlock;
-import lombok.RequiredArgsConstructor;
+import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * BlockAwareChunker 调度器
+ * 分块调度器：Block 类型 → chunker 查表分发，同一类型被两个 chunker 认领时启动即失败
  * <p>
- * 把 {@code List<Block>} 分发到各类型专属 chunker。HeadingHandler 不产 chunk，
- * 但累积 outlinePath 注入到后续 chunker 的 ChunkContext
- * <p>
- * 注：Java 17 中 sealed switch pattern 仍是 preview，用 instanceof pattern 链替代
- * Java 21 升级后可改回 switch 表达式
+ * 标题先更新章节路径再照常分发，于是它拿到的是含自己在内的路径，与其后正文同节而自然同块；
+ * 流程固定为分发产草稿 → 按节打包 → 统一装配，装配留在末端是因为向量文本要拼章节前缀，
+ * 而打包只能发生在拼前缀之前
  */
 @Component
-@RequiredArgsConstructor
 public class BlockAwareChunkerDispatcher {
 
     private final HeadingHandler headingHandler;
-    private final ParagraphChunker paragraphChunker;
-    private final TableChunker tableChunker;
-    private final ImageChunker imageChunker;
-    private final CodeChunker codeChunker;
-    private final ListChunker listChunker;
     private final ChunkPacker chunkPacker;
+    private final Map<Class<? extends Block>, BlockChunker<?>> registry;
+
+    public BlockAwareChunkerDispatcher(HeadingHandler headingHandler,
+                                       ChunkPacker chunkPacker,
+                                       List<BlockChunker<?>> chunkers) {
+        this.headingHandler = headingHandler;
+        this.chunkPacker = chunkPacker;
+        Map<Class<? extends Block>, BlockChunker<?>> table = new HashMap<>();
+        for (BlockChunker<?> chunker : chunkers) {
+            BlockChunker<?> previous = table.put(chunker.blockType(), chunker);
+            if (previous != null) {
+                throw new ServiceException(String.format(
+                        "Block 分块器注册冲突：类型=%s 同时被 %s 与 %s 认领",
+                        chunker.blockType().getSimpleName(),
+                        previous.getClass().getSimpleName(), chunker.getClass().getSimpleName()));
+            }
+        }
+        this.registry = Map.copyOf(table);
+    }
 
     /**
-     * 把 Block 列表分发到对应 chunker,返回有序 VectorChunk 列表
-     *
-     * @param blocks 解析器产出的 Block 列表
-     * @param config 切分配置
-     * @return VectorChunk 列表，index 单调递增
+     * 把 Block 列表切分为有序块，序号从 0 单调递增
      */
-    public List<VectorChunk> dispatch(List<Block> blocks, BlockChunkConfig config) {
+    public List<Chunk> dispatch(List<Block> blocks, ChunkBudget budget) {
         if (blocks == null || blocks.isEmpty()) {
             return List.of();
         }
 
-        List<String> outlinePath = List.of();
-        List<VectorChunk> result = new ArrayList<>();
-        int chunkIndex = 0;
-
-        for (Block b : blocks) {
-            if (b instanceof HeadingBlock h) {
-                outlinePath = headingHandler.update(outlinePath, h);
-                continue;
+        HeadingHandler.Outline outline = HeadingHandler.Outline.EMPTY;
+        List<ChunkDraft> drafts = new ArrayList<>();
+        for (Block block : blocks) {
+            if (block instanceof HeadingBlock heading) {
+                outline = headingHandler.update(outline, heading);
             }
-
-            ChunkContext ctx = ChunkContext.of(outlinePath, config, chunkIndex);
-            List<VectorChunk> chunks = chunkOne(b, ctx);
-            result.addAll(chunks);
-            chunkIndex += chunks.size();
+            drafts.addAll(chunkOne(block, ChunkContext.of(outline.path(), budget)));
         }
-        // 后处理: 把相邻文本小块贪心打包到 maxChars, 断块处按 overlapChars 做块级重叠(单块 chunker 只拆不并)
-        return chunkPacker.pack(result, config.maxChars(), config.overlapChars());
+
+        return ChunkAssembler.assembleAll(chunkPacker.pack(drafts, budget));
     }
 
-    private List<VectorChunk> chunkOne(Block b, ChunkContext ctx) {
-        if (b instanceof ParagraphBlock p) {
-            return paragraphChunker.chunk(p, ctx);
+    @SuppressWarnings("unchecked")
+    private List<ChunkDraft> chunkOne(Block block, ChunkContext ctx) {
+        BlockChunker<Block> chunker = (BlockChunker<Block>) registry.get(block.getClass());
+        if (chunker == null) {
+            throw new ServiceException("没有 chunker 认领 Block 类型：" + block.getClass().getName());
         }
-        if (b instanceof TableBlock t) {
-            return tableChunker.chunk(t, ctx);
-        }
-        if (b instanceof ImageBlock i) {
-            return imageChunker.chunk(i, ctx);
-        }
-        if (b instanceof CodeBlock c) {
-            return codeChunker.chunk(c, ctx);
-        }
-        if (b instanceof ListBlock l) {
-            return listChunker.chunk(l, ctx);
-        }
-        throw new IllegalStateException("Unsupported Block type: " + b.getClass().getName());
+        return chunker.chunk(block, ctx);
     }
 }

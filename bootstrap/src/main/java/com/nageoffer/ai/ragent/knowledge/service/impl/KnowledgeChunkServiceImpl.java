@@ -35,7 +35,12 @@ import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeChunkCreate
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeChunkPageRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeChunkUpdateRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.vo.KnowledgeChunkVO;
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.Chunk;
+import com.nageoffer.ai.ragent.core.chunk.model.ChunkAssembler;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
+import com.nageoffer.ai.ragent.core.ingest.VectorTarget;
+import com.nageoffer.ai.ragent.core.ingest.embed.ChunkEmbeddingService;
+import com.nageoffer.ai.ragent.knowledge.support.VectorTargetResolver;
 import com.nageoffer.ai.ragent.knowledge.dao.entity.KnowledgeChunkDO;
 import com.nageoffer.ai.ragent.knowledge.dao.entity.KnowledgeBaseDO;
 import com.nageoffer.ai.ragent.knowledge.dao.entity.KnowledgeDocumentDO;
@@ -45,7 +50,6 @@ import com.nageoffer.ai.ragent.knowledge.dao.mapper.KnowledgeDocumentMapper;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
-import com.nageoffer.ai.ragent.infra.embedding.EmbeddingService;
 import com.nageoffer.ai.ragent.infra.token.TokenCounterService;
 import com.nageoffer.ai.ragent.knowledge.enums.DocumentStatus;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorStoreService;
@@ -73,7 +77,8 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
     private final KnowledgeChunkMapper chunkMapper;
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
-    private final EmbeddingService embeddingService;
+    private final ChunkEmbeddingService chunkEmbeddingService;
+    private final VectorTargetResolver vectorTargetResolver;
     private final TokenCounterService tokenCounterService;
     private final VectorStoreService vectorStoreService;
     private final TransactionOperations transactionOperations;
@@ -144,6 +149,8 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
                 .contentHash(contentHash)
                 .charCount(charCount)
                 .tokenCount(tokenCount)
+                // 人工块没有结构信息，向量文本等于正文；显式写下而不是留空，重建时才不必猜
+                .embeddingText(content)
                 .enabled(1)
                 .createdBy(UserContext.getUsername())
                 .updatedBy(UserContext.getUsername())
@@ -157,97 +164,10 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
                 .setSql("chunk_count = chunk_count + 1"));
 
         // 同步写入向量库
-        syncChunkToVector(collectionName, docId, chunkDO, embeddingModel);
+        syncChunkToVector(collectionName, docId, chunkDO, vectorTargetResolver.resolve(kbDO));
 
         bizChangeLogContext.put(String.valueOf(chunkDO.getId()), null, chunkDO);
         return BeanUtil.toBean(chunkDO, KnowledgeChunkVO.class);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void batchCreate(String docId, List<KnowledgeChunkCreateRequest> requestParams) {
-        batchCreate(docId, requestParams, false);
-    }
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public void batchCreate(String docId, List<KnowledgeChunkCreateRequest> requestParams, boolean writeVector) {
-        if (CollUtil.isEmpty(requestParams)) {
-            return;
-        }
-
-        KnowledgeDocumentDO documentDO = documentMapper.selectById(docId);
-        Assert.notNull(documentDO, () -> new ClientException("文档不存在"));
-
-        boolean needAutoIndex = requestParams.stream().anyMatch(request -> request.getIndex() == null);
-        int nextIndex = 0;
-        if (needAutoIndex) {
-            KnowledgeChunkDO latest = chunkMapper.selectOne(
-                    new LambdaQueryWrapper<KnowledgeChunkDO>()
-                            .eq(KnowledgeChunkDO::getDocId, docId)
-                            .orderByDesc(KnowledgeChunkDO::getChunkIndex)
-                            .last("LIMIT 1")
-            );
-            nextIndex = latest != null && latest.getChunkIndex() != null ? latest.getChunkIndex() + 1 : 0;
-        }
-
-        String kbId = documentDO.getKbId();
-        String username = UserContext.getUsername();
-        KnowledgeBaseDO kbDO = knowledgeBaseMapper.selectById(kbId);
-        String embeddingModel = kbDO.getEmbeddingModel();
-        String collectionName = kbDO.getCollectionName();
-        List<KnowledgeChunkDO> chunkDOList = new ArrayList<>(requestParams.size());
-
-        for (KnowledgeChunkCreateRequest request : requestParams) {
-            String content = request.getContent();
-            Assert.notBlank(content, () -> new ClientException("Chunk 内容不能为空"));
-
-            Integer chunkIndex = request.getIndex();
-            if (chunkIndex == null) {
-                chunkIndex = nextIndex++;
-            }
-
-            String chunkId = request.getChunkId();
-            if (!StringUtils.hasText(chunkId)) {
-                chunkId = IdUtil.getSnowflakeNextIdStr();
-            }
-
-            KnowledgeChunkDO chunkDO = KnowledgeChunkDO.builder()
-                    .id(chunkId)
-                    .kbId(kbId)
-                    .docId(docId)
-                    .chunkIndex(chunkIndex)
-                    .content(content)
-                    .contentHash(SecureUtil.sha256(content))
-                    .charCount(content.length())
-                    .tokenCount(resolveTokenCount(content))
-                    .enabled(1)
-                    .createdBy(username)
-                    .updatedBy(username)
-                    .build();
-            chunkDOList.add(chunkDO);
-        }
-
-        // 批量写入数据库，向量索引由上层统一处理以避免重复计算
-        chunkMapper.insert(chunkDOList);
-
-        documentMapper.update(Wrappers.lambdaUpdate(KnowledgeDocumentDO.class)
-                .eq(KnowledgeDocumentDO::getId, docId)
-                .setSql("chunk_count = chunk_count + " + chunkDOList.size()));
-
-        if (writeVector) {
-            List<VectorChunk> vectorChunks = chunkDOList.stream()
-                    .map(each -> VectorChunk.builder()
-                            .chunkId(String.valueOf(each.getId()))
-                            .content(each.getContent())
-                            .index(each.getChunkIndex())
-                            .build())
-                    .toList();
-            if (CollUtil.isNotEmpty(vectorChunks)) {
-                attachEmbeddings(vectorChunks, embeddingModel);
-                vectorStoreService.indexDocumentChunks(collectionName, docId, vectorChunks);
-            }
-        }
     }
 
     @Override
@@ -288,6 +208,8 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         String embeddingModel = kbDO.getEmbeddingModel();
         String collectionName = kbDO.getCollectionName();
         chunkDO.setTokenCount(resolveTokenCount(newContent));
+        // 向量文本必须跟着正文一起改：否则向量按新正文更新、库里那份还是旧文本，下次重建就用错的文本
+        chunkDO.setEmbeddingText(newContent);
         chunkDO.setUpdatedBy(UserContext.getUsername());
 
         chunkMapper.updateById(chunkDO);
@@ -295,16 +217,8 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         log.info("更新 Chunk 成功, kbId={}, docId={}, chunkId={}", documentDO.getKbId(), docId, chunkId);
 
         // 同步向量数据库
-        vectorStoreService.updateChunk(
-                collectionName,
-                docId,
-                VectorChunk.builder()
-                        .chunkId(chunkId)
-                        .content(newContent)
-                        .index(chunkDO.getChunkIndex())
-                        .embedding(toArray(embedContent(newContent, embeddingModel)))
-                        .build()
-        );
+        vectorStoreService.updateChunk(collectionName, docId,
+                embedPersisted(List.of(chunkDO), vectorTargetResolver.resolve(kbDO)).get(0));
         bizChangeLogContext.put(chunkId, before, chunkMapper.selectById(chunkId));
     }
 
@@ -388,7 +302,7 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
 
         if (enabled) {
             String embeddingModel = kbDO.getEmbeddingModel();
-            syncChunkToVector(collectionName, docId, chunkDO, embeddingModel);
+            syncChunkToVector(collectionName, docId, chunkDO, vectorTargetResolver.resolve(kbDO));
         } else {
             deleteChunkFromVector(collectionName, chunkId);
         }
@@ -456,14 +370,7 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
         String collectionName = kbDO.getCollectionName();
 
         if (enabled) {
-            List<VectorChunk> vectorChunks = needUpdateChunks.stream()
-                    .map(c -> VectorChunk.builder()
-                            .chunkId(c.getId())
-                            .content(c.getContent())
-                            .index(c.getChunkIndex())
-                            .build())
-                    .collect(Collectors.toList());
-            attachEmbeddings(vectorChunks, kbDO.getEmbeddingModel());
+            List<EmbeddedChunk> vectorChunks = embedPersisted(needUpdateChunks, vectorTargetResolver.resolve(kbDO));
 
             transactionOperations.executeWithoutResult(status -> {
                 chunkMapper.update(
@@ -505,7 +412,7 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
     }
 
     @Override
-    public List<KnowledgeChunkVO> listByDocId(String docId) {
+    public List<EmbeddedChunk> embedPersistedChunks(String docId, VectorTarget target) {
         KnowledgeDocumentDO documentDO = documentMapper.selectById(docId);
         Assert.notNull(documentDO, () -> new ClientException("文档不存在"));
 
@@ -514,10 +421,10 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
                         .eq(KnowledgeChunkDO::getDocId, docId)
                         .orderByAsc(KnowledgeChunkDO::getChunkIndex)
         );
-
-        return chunkDOList.stream()
-                .map(each -> BeanUtil.toBean(each, KnowledgeChunkVO.class))
-                .collect(Collectors.toList());
+        if (CollUtil.isEmpty(chunkDOList)) {
+            return List.of();
+        }
+        return embedPersisted(chunkDOList, target);
     }
 
     @Override
@@ -546,16 +453,9 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
     /**
      * 将单个 chunk 同步到向量库
      */
-    private void syncChunkToVector(String collectionName, String docId, KnowledgeChunkDO chunkDO, String embeddingModel) {
-        List<Float> embedding = embedContent(chunkDO.getContent(), embeddingModel);
-        float[] vector = toArray(embedding);
-
-        VectorChunk chunk = VectorChunk.builder()
-                .index(chunkDO.getChunkIndex())
-                .content(chunkDO.getContent())
-                .chunkId(String.valueOf(chunkDO.getId()))
-                .embedding(vector)
-                .build();
+    private void syncChunkToVector(String collectionName, String docId, KnowledgeChunkDO chunkDO,
+                                   VectorTarget target) {
+        EmbeddedChunk chunk = embedPersisted(List.of(chunkDO), target).get(0);
         vectorStoreService.indexDocumentChunks(collectionName, docId, List.of(chunk));
 
         log.debug("同步 Chunk 到向量库成功, collectionName={}, docId={}, chunkId={}", collectionName, docId, chunkDO.getId());
@@ -570,40 +470,17 @@ public class KnowledgeChunkServiceImpl implements KnowledgeChunkService {
     }
 
     /**
-     * List<Float> 转 float[]
+     * 已入库块重新向量化：向量文本取库里那一份，块 ID 沿用关系库主键
+     * <p>
+     * 全系统"行 → 向量"的唯一入口，见 {@link ChunkAssembler#restore}
      */
-    private static float[] toArray(List<Float> list) {
-        float[] arr = new float[list.size()];
-        for (int i = 0; i < list.size(); i++) {
-            arr[i] = list.get(i);
-        }
-        return arr;
-    }
-
-    private void attachEmbeddings(List<VectorChunk> chunks, String embeddingModel) {
-        if (CollUtil.isEmpty(chunks)) {
-            return;
-        }
-        List<String> texts = chunks.stream().map(VectorChunk::getContent).toList();
-        List<List<Float>> vectors = embedBatch(texts, embeddingModel);
-        if (vectors == null || vectors.size() != chunks.size()) {
-            throw new ServiceException("向量结果数量不匹配");
-        }
-        for (int i = 0; i < chunks.size(); i++) {
-            chunks.get(i).setEmbedding(toArray(vectors.get(i)));
-        }
-    }
-
-    private List<Float> embedContent(String content, String embeddingModel) {
-        return StrUtil.isBlank(embeddingModel)
-                ? embeddingService.embed(content)
-                : embeddingService.embed(content, embeddingModel);
-    }
-
-    private List<List<Float>> embedBatch(List<String> texts, String embeddingModel) {
-        return StrUtil.isBlank(embeddingModel)
-                ? embeddingService.embedBatch(texts)
-                : embeddingService.embedBatch(texts, embeddingModel);
+    private List<EmbeddedChunk> embedPersisted(List<KnowledgeChunkDO> rows, VectorTarget target) {
+        List<Chunk> chunks = rows.stream()
+                .map(each -> ChunkAssembler.restore(each.getId(),
+                        each.getChunkIndex() == null ? 0 : each.getChunkIndex(),
+                        each.getContent(), each.getEmbeddingText()))
+                .toList();
+        return chunkEmbeddingService.embed(chunks, target);
     }
 
     private Integer resolveTokenCount(String content) {

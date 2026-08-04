@@ -17,7 +17,7 @@
 
 package com.nageoffer.ai.ragent.rag.core.vector.decorator;
 
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
 import com.nageoffer.ai.ragent.rag.core.keyword.KeywordIndexService;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorStoreService;
 import lombok.extern.slf4j.Slf4j;
@@ -27,11 +27,9 @@ import java.util.List;
 /**
  * 向量写入的关键词同步装饰器
  * <p>
- * 包裹真实的 {@link VectorStoreService}，在向量写入/更新/删除成功后，同步维护关键词索引（ES）
- * 一处覆盖全部 6 个向量写调用点，无需改动任何调用方
- * <p>
- * 关键词写入为 best-effort：失败只记日志、不回滚向量、不中断主链路，因为关键词检索是非必须能力
- * 若对数据一致性要求万无一失，建议改为监听 binlog（CDC）异步写 ES 等异构存储，而非在此同步双写
+ * 包裹真实的 {@link VectorStoreService}，在向量写入 / 更新 / 删除成功后同步维护 ES 关键词索引，一处
+ * 覆盖全部向量写调用点；写入为 best-effort，失败只记日志、不回滚向量、不中断主链路，要求强一致时
+ * 应改为监听 binlog（CDC）异步写，而非在此同步双写
  */
 @Slf4j
 public class KeywordSyncingVectorStoreService implements VectorStoreService {
@@ -46,13 +44,13 @@ public class KeywordSyncingVectorStoreService implements VectorStoreService {
     }
 
     @Override
-    public void indexDocumentChunks(String collectionName, String docId, List<VectorChunk> chunks) {
+    public void indexDocumentChunks(String collectionName, String docId, List<EmbeddedChunk> chunks) {
         delegate.indexDocumentChunks(collectionName, docId, chunks);
         syncKeyword(docId, () -> keywordIndexService.indexDocumentChunks(collectionName, docId, chunks));
     }
 
     @Override
-    public void updateChunk(String collectionName, String docId, VectorChunk chunk) {
+    public void updateChunk(String collectionName, String docId, EmbeddedChunk chunk) {
         delegate.updateChunk(collectionName, docId, chunk);
         syncKeyword(docId, () -> keywordIndexService.updateChunk(collectionName, docId, chunk));
     }

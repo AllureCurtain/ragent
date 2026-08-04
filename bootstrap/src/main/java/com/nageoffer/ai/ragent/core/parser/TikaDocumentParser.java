@@ -21,29 +21,28 @@ import com.nageoffer.ai.ragent.core.parser.model.Block;
 import com.nageoffer.ai.ragent.core.parser.model.ParagraphBlock;
 import com.nageoffer.ai.ragent.core.parser.model.ParsedDocument;
 import com.nageoffer.ai.ragent.core.parser.model.Provenance;
+import com.nageoffer.ai.ragent.core.parser.registry.ParseProfile;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
 import org.apache.tika.parser.pdf.PDFParserConfig;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.Set;
 
 /**
- * Apache Tika 文档解析器
+ * Apache Tika 解析器：纯文本类格式的兜底，覆盖 HTML / JSON / XML / RTF 及未被更专门的解析器认领的
+ * {@code text/*}；复杂版面（PDF / Word / PPT）走 MinerU，表格走 POI / CSV，markdown 走 commonmark
  * <p>
- * 支持多种文档格式：PDF、Word、Excel、PPT、HTML、XML 等
- * 使用 Apache Tika 库进行文档解析和文本提取
+ * 长尾靠 {@code text/*} 通配键覆盖，精确键一律优先于通配键，因此 {@code text/csv}、
+ * {@code text/plain}、{@code text/x-web-markdown}（Tika 探测 {@code .md} 的产出）都不会落到这里
  */
 @Slf4j
 @Component
-@Order(Ordered.LOWEST_PRECEDENCE)
 public class TikaDocumentParser implements DocumentParser {
 
     private static final Tika TIKA = new Tika();
@@ -60,10 +59,7 @@ public class TikaDocumentParser implements DocumentParser {
     }
 
     /**
-     * 结构化解析:按 {@code \n\n+} 空行分段输出 ParagraphBlock 列表
-     * <p>
-     * Tika 输出是平文本,无章节标题/表格等结构信息可挖,故只产 ParagraphBlock
-     * 复杂版面文档(PDF / Word / PPT)应路由到 MinerU 解析器,不走 Tika 路径
+     * 结构化解析：Tika 输出是平文本，无章节标题 / 表格结构可挖，故按 {@code \n\n+} 空行分段，只产 ParagraphBlock
      */
     @Override
     public ParsedDocument parseStructured(byte[] content, String mimeType, Map<String, Object> options) {
@@ -87,7 +83,7 @@ public class TikaDocumentParser implements DocumentParser {
             if (trimmed.isEmpty()) {
                 continue;
             }
-            blocks.add(new ParagraphBlock(UUID.randomUUID().toString(), prov, List.of(), trimmed));
+            blocks.add(new ParagraphBlock(prov, trimmed));
         }
         return ParsedDocument.of(blocks, Map.of("parser", getParserType(), "mimeType", mimeType == null ? "" : mimeType));
     }
@@ -100,30 +96,19 @@ public class TikaDocumentParser implements DocumentParser {
         return v == null ? "" : v.toString();
     }
 
+    /**
+     * 精确键覆盖已声明支持的格式，{@code text/*} 通配只兜未声明的长尾；刻意不认领 image 与未知 MIME，
+     * 认不出来就报错，不要兜底产出垃圾文本
+     */
     @Override
-    public boolean supports(String mimeType) {
-        // v1.1 收紧：Tika 只用于 text/* 基础格式
-        // PDF/Word/PPT → MinerU, Excel → POI, Markdown → Markdown
-        // image / octet-stream / 未知 MIME → 返回 false 让 ParserNode 显式报错
-        if (mimeType == null) {
-            return false;
-        }
-        String lower = mimeType.toLowerCase(java.util.Locale.ROOT);
-        if (lower.startsWith("text/markdown") || lower.startsWith("text/x-markdown")) {
-            return false;
-        }
-        // CSV 交给 CsvDocumentParser 产 key-val 表格，不走 Tika 平文本
-        if (lower.equals("text/csv") || lower.equals("application/csv")
-                || lower.equals("text/comma-separated-values")) {
-            return false;
-        }
-        // 仅接受 text/* 与 application/json|xml|xhtml+xml 等纯文本类型
-        if (lower.startsWith("text/")) {
-            return true;
-        }
-        return lower.equals("application/json")
-                || lower.equals("application/xml")
-                || lower.equals("application/xhtml+xml")
-                || lower.equals("application/rtf");
+    public Map<ParseProfile, Set<String>> supportedMimeTypes() {
+        return Map.of(ParseProfile.FAST, Set.of(
+                "text/*",
+                "text/html",
+                "application/json",
+                "application/xml",
+                "application/xhtml+xml",
+                "application/rtf"
+        ));
     }
 }

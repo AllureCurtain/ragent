@@ -23,6 +23,7 @@ import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.rag.dao.entity.ConversationMessageDO;
 import com.nageoffer.ai.ragent.rag.dao.mapper.ConversationMessageMapper;
+import com.nageoffer.ai.ragent.rag.core.source.CitationMarkup;
 import com.nageoffer.ai.ragent.rag.dto.RecommendedQuestionsPayload;
 import com.nageoffer.ai.ragent.rag.service.RecommendedQuestionService;
 import lombok.RequiredArgsConstructor;
@@ -61,7 +62,7 @@ public class RecommendedQuestionServiceImpl implements RecommendedQuestionServic
 
         String question = loadQuestion(message);
         RecommendedQuestionsPayload generated =
-                generator.generate(question, message.getContent(), message.getRetrievedChunks());
+                generator.generate(question, CitationMarkup.strip(message.getContent()), message.getRetrievedChunks());
         if (generated.status() == RecommendedQuestionsPayload.Status.FAILED) {
             return generated;
         }

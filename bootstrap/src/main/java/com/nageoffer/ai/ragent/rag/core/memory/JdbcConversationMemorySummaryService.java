@@ -20,6 +20,7 @@ package com.nageoffer.ai.ragent.rag.core.memory;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
+import com.nageoffer.ai.ragent.rag.core.source.CitationMarkup;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import com.nageoffer.ai.ragent.infra.enums.Tier;
@@ -230,7 +231,7 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
                     if ("user".equals(role)) {
                         return ChatMessage.user(item.getContent());
                     } else if ("assistant".equals(role)) {
-                        return ChatMessage.assistant(item.getContent());
+                        return ChatMessage.assistant(CitationMarkup.strip(item.getContent()));
                     }
                     return null;
                 })

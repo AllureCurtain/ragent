@@ -37,7 +37,7 @@ import java.util.List;
 /**
  * 基于 Elasticsearch 的关键词检索服务
  * <p>
- * 在共享索引上用 multi_match + BM25 在 content / outline 字段做全文匹配，
+ * 在共享索引上用 BM25 在 content 字段做全文匹配，
  * 并以 collection_name terms 过滤限定知识库范围；命中 _id 即向量库主键 chunkId，
  * 映射为与向量结果同构的 {@link RetrievedChunk}
  * <p>
@@ -66,9 +66,7 @@ public class EsKeywordRetrieverService implements KeywordRetrieverService {
                             .ignoreUnavailable(true)
                             .allowNoIndices(true)
                             .query(q -> q.bool(b -> {
-                                b.must(m -> m.multiMatch(mm -> mm
-                                        .query(query)
-                                        .fields("content", "outline")));
+                                b.must(m -> m.match(mt -> mt.field("content").query(query)));
                                 // 空表示不限库（全局）；否则以 collection_name terms 限定目标知识库范围
                                 if (!collectionFilter.isEmpty()) {
                                     b.filter(f -> f.terms(t -> t

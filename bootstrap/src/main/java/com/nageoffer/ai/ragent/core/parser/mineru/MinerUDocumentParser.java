@@ -20,62 +20,75 @@ package com.nageoffer.ai.ragent.core.parser.mineru;
 import com.nageoffer.ai.ragent.core.parser.DocumentParser;
 import com.nageoffer.ai.ragent.core.parser.ParserType;
 import com.nageoffer.ai.ragent.core.parser.model.ParsedDocument;
+import com.nageoffer.ai.ragent.core.parser.registry.ParseProfile;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RPermitExpirableSemaphore;
 import org.redisson.api.RedissonClient;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * MinerU 文档解析器(PDF / Word / PPT / Excel)
+ * MinerU 文档解析器（PDF / Word / PPT / Excel）：走官方「本地文件批量上传解析」，上传后轮询等结果
  * <p>
- * 走 MinerU 官方"本地文件批量上传解析"，串联各组件实现 B-lite 异步解析:
- * <ol>
- *   <li>{@link RPermitExpirableSemaphore} 获取跨实例解析许可，限制 MinerU outstanding 任务数</li>
- *   <li>{@link MinerUClient#requestUpload} 申请上传链接，拿 batchId + 上传 URL</li>
- *   <li>{@link MinerUClient#uploadFile} 把源文件字节 PUT 上传到 MinerU OSS</li>
- *   <li>{@link MinerUPollingExecutor#submitAndAwait} 阻塞等待完成</li>
- *   <li>{@link MinerUClient#downloadZip} 下载 zip</li>
- *   <li>{@link MinerUResultUnpacker#unpack} 解包为 Block 列表(图片自动上传 RustFS)</li>
- * </ol>
- * <p>
- * 本地上传链路不依赖任何公网可达的源文件 URL，适配内网/本地部署
- * 配置项见 {@link MinerUProperties}
+ * 本地上传链路不依赖任何公网可达的源文件 URL，适配内网部署；解析许可由 {@link RPermitExpirableSemaphore}
+ * 跨实例发放，压住 MinerU 侧同时在跑的任务数，配置项见 {@link MinerUProperties}
  */
 @Slf4j
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@RequiredArgsConstructor
 public class MinerUDocumentParser implements DocumentParser {
 
     /**
-     * options 字段:文件名,写入 Provenance.sourceFile
+     * 版面解析类：PDF / Word / PPT 只有 MinerU 一条路，两个档位都由它承担
+     */
+    private static final Set<String> LAYOUT_MIME_TYPES = Set.of(
+            "application/pdf",
+            "application/x-pdf",
+            "application/msword",
+            "application/vnd.ms-word",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.openxmlformats-officedocument.presentationml.slideshow"
+    );
+
+    /**
+     * 表格类只在保真档认领：默认走 POI 快速 key-val，用户选保真档才付 MinerU 的成本
+     */
+    private static final Set<String> SPREADSHEET_MIME_TYPES = Set.of(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-excel"
+    );
+
+    /**
+     * options 字段：文件名，写入 Provenance.sourceFile
      */
     public static final String OPT_SOURCE_FILE = "sourceFile";
 
     /**
-     * options 字段:文档 ID,用于资产 key 命名;不传时自动生成 UUID
+     * options 字段：文档 ID，用于资产 key 命名，不传时自动生成 UUID
      */
     public static final String OPT_DOCUMENT_ID = "documentId";
 
     /**
-     * ParsedDocument.metadata 字段:MinerU 分配的 batchId(排障 + B 升级用)
+     * ParsedDocument.metadata 字段：MinerU 分配的 batchId，排障时凭它去 MinerU 侧查任务
      */
     public static final String META_BATCH_ID = "minerU.batchId";
 
     /**
-     * ParsedDocument.metadata 字段:zip 下载 URL
+     * ParsedDocument.metadata 字段：zip 下载 URL
      */
     public static final String META_ZIP_URL = "minerU.zipUrl";
 
@@ -84,18 +97,6 @@ public class MinerUDocumentParser implements DocumentParser {
     private final MinerUResultUnpacker resultUnpacker;
     private final MinerUProperties properties;
     private final RedissonClient redissonClient;
-
-    public MinerUDocumentParser(MinerUClient minerUClient,
-                                MinerUPollingExecutor pollingExecutor,
-                                MinerUResultUnpacker resultUnpacker,
-                                MinerUProperties properties,
-                                RedissonClient redissonClient) {
-        this.minerUClient = minerUClient;
-        this.pollingExecutor = pollingExecutor;
-        this.resultUnpacker = resultUnpacker;
-        this.properties = properties;
-        this.redissonClient = redissonClient;
-    }
 
     @PostConstruct
     void initSemaphore() {
@@ -111,15 +112,11 @@ public class MinerUDocumentParser implements DocumentParser {
     }
 
     @Override
-    public boolean supports(String mimeType) {
-        if (mimeType == null) {
-            return false;
-        }
-        // Excel 不纳入 MIME 自动路由：默认走 POI 简单 key-val，复杂版面由上层显式选择 MinerU
-        String lower = mimeType.toLowerCase(Locale.ROOT);
-        return lower.contains("pdf")
-                || lower.contains("wordprocessingml") || lower.contains("msword")
-                || lower.contains("presentationml") || lower.contains("powerpoint");
+    public Map<ParseProfile, Set<String>> supportedMimeTypes() {
+        return Map.of(
+                ParseProfile.FAST, LAYOUT_MIME_TYPES,
+                ParseProfile.FIDELITY, SPREADSHEET_MIME_TYPES
+        );
     }
 
     @Override
@@ -156,10 +153,9 @@ public class MinerUDocumentParser implements DocumentParser {
     private ParsedDocument doParseStructured(byte[] content, String mimeType, Map<String, Object> options) {
         String sourceFile = extractString(options, OPT_SOURCE_FILE, "");
         String documentId = extractString(options, OPT_DOCUMENT_ID, UUID.randomUUID().toString());
-        // MinerU 靠 name 扩展名识别格式,缺文件名时按 mimeType 补全
         String uploadName = resolveUploadName(sourceFile, mimeType, documentId);
 
-        // 1. 申请上传链接(只提交元信息,不带 url)
+        // 1. 申请上传链接，只提交元信息、不带 url
         BatchSubmitRequest request = buildSubmitRequest(uploadName, documentId);
         BatchUploadTicket ticket = minerUClient.requestUpload(request);
 
@@ -167,7 +163,7 @@ public class MinerUDocumentParser implements DocumentParser {
         minerUClient.uploadFile(ticket.uploadUrl(), content);
         log.info("MinerU 源文件上传完毕 documentId={} batchId={}", documentId, ticket.batchId());
 
-        // 3. 阻塞 await 完成(上传后 MinerU 自动提交解析)
+        // 3. 阻塞等待完成，上传动作本身就触发 MinerU 提交解析，无需再调提交接口
         MinerUStatus status;
         try {
             status = pollingExecutor
@@ -192,7 +188,7 @@ public class MinerUDocumentParser implements DocumentParser {
         // 5. 解包为 ParsedDocument
         ParsedDocument parsed = resultUnpacker.unpack(zipBytes, sourceFile, documentId);
 
-        // 6. 注入 batchId + zipUrl 到 metadata,供 ParserNode/IngestionContext 持久化(排障 + 重试幂等)
+        // 6. batchId + zipUrl 注入 metadata，供下游节点持久化后排障
         Map<String, Object> mergedMeta = new HashMap<>(parsed.metadata() == null ? Map.of() : parsed.metadata());
         mergedMeta.put(META_BATCH_ID, ticket.batchId());
         mergedMeta.put(META_ZIP_URL, status.zipUrl());
@@ -203,9 +199,7 @@ public class MinerUDocumentParser implements DocumentParser {
     }
 
     /**
-     * 计算上传到 MinerU 的文件名,确保带正确扩展名(MinerU 靠它识别格式)
-     * <p>
-     * 有原始文件名直接用,否则按 mimeType 合成 {@code doc-{documentId}{ext}}
+     * 计算上传到 MinerU 的文件名，必须带扩展名，MinerU 靠它识别格式；缺原始文件名时按 mimeType 补全
      */
     private String resolveUploadName(String sourceFile, String mimeType, String documentId) {
         if (sourceFile != null && !sourceFile.isBlank()) {

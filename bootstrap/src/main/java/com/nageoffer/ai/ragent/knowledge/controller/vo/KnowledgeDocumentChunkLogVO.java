@@ -44,7 +44,7 @@ public class KnowledgeDocumentChunkLogVO {
     /**
      * 分块策略（仅 chunk 模式）
      */
-    private String chunkStrategy;
+    private String parseProfile;
 
     /**
      * Pipeline ID（仅 pipeline 模式）

@@ -58,9 +58,9 @@ public class KnowledgeDocumentChunkLogDO {
     private String processMode;
 
     /**
-     * 分块策略（仅 chunk 模式）
+     * 解析档位（仅 chunk 模式）：排障时用于确认这篇文档走的是快速档还是保真档
      */
-    private String chunkStrategy;
+    private String parseProfile;
 
     /**
      * Pipeline ID（仅 pipeline 模式）

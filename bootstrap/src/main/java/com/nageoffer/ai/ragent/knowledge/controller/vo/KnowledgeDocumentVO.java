@@ -88,11 +88,6 @@ public class KnowledgeDocumentVO {
     private Long fileSize;
 
     /**
-     * 分块策略
-     */
-    private String chunkStrategy;
-
-    /**
      * 处理模式：chunk / pipeline
      * - chunk: 使用分块策略直接分块
      * - pipeline: 使用数据通道进行清洗处理
@@ -100,9 +95,9 @@ public class KnowledgeDocumentVO {
     private String processMode;
 
     /**
-     * 分块参数配置（JSON）
+     * 文档级摄取配置（JSON）：解析档位 + 分块预算
      */
-    private String chunkConfig;
+    private String ingestionSpec;
 
     /**
      * 数据通道（Pipeline）ID

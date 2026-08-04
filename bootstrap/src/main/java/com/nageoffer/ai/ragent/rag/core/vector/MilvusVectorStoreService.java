@@ -22,7 +22,7 @@ import cn.hutool.core.util.IdUtil;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.rag.config.RAGDefaultProperties;
 import io.milvus.v2.client.MilvusClientV2;
@@ -52,7 +52,7 @@ public class MilvusVectorStoreService implements VectorStoreService {
     private final RAGDefaultProperties ragDefaultProperties;
 
     @Override
-    public void indexDocumentChunks(String collectionName, String docId, List<VectorChunk> chunks) {
+    public void indexDocumentChunks(String collectionName, String docId, List<EmbeddedChunk> chunks) {
         Assert.isFalse(chunks == null || chunks.isEmpty(), () -> new ClientException("文档分块不允许为空"));
 
         final int dim = ragDefaultProperties.getDimension();
@@ -60,9 +60,9 @@ public class MilvusVectorStoreService implements VectorStoreService {
 
         List<JsonObject> rows = new ArrayList<>(chunks.size());
         for (int i = 0; i < chunks.size(); i++) {
-            VectorChunk chunk = chunks.get(i);
+            EmbeddedChunk chunk = chunks.get(i);
 
-            String content = chunk.getContent() == null ? "" : chunk.getContent();
+            String content = chunk.content() == null ? "" : chunk.content();
             if (content.length() > 65535) {
                 content = content.substring(0, 65535);
             }
@@ -70,7 +70,7 @@ public class MilvusVectorStoreService implements VectorStoreService {
             JsonObject metadata = buildMetadata(docId, chunk);
 
             JsonObject row = new JsonObject();
-            row.addProperty("id", chunk.getChunkId());
+            row.addProperty("id", chunk.chunkId());
             row.addProperty("collection_name", collectionName);
             row.addProperty("content", content);
             row.add("metadata", metadata);
@@ -89,15 +89,15 @@ public class MilvusVectorStoreService implements VectorStoreService {
     }
 
     @Override
-    public void updateChunk(String collectionName, String docId, VectorChunk chunk) {
+    public void updateChunk(String collectionName, String docId, EmbeddedChunk chunk) {
         Assert.isFalse(chunk == null, () -> new ClientException("Chunk 对象不能为空"));
 
         final int dim = ragDefaultProperties.getDimension();
         float[] vector = extractVector(chunk, dim);
 
-        String chunkPk = chunk.getChunkId() != null ? chunk.getChunkId() : IdUtil.getSnowflakeNextIdStr();
+        String chunkPk = chunk.chunkId();
 
-        String content = chunk.getContent() == null ? "" : chunk.getContent();
+        String content = chunk.content() == null ? "" : chunk.content();
         if (content.length() > 65535) {
             content = content.substring(0, 65535);
         }
@@ -171,16 +171,16 @@ public class MilvusVectorStoreService implements VectorStoreService {
                 collectionName, chunkIds.size(), resp.getDeleteCnt());
     }
 
-    private List<float[]> extractVectors(List<VectorChunk> chunks, int expectedDim) {
+    private List<float[]> extractVectors(List<EmbeddedChunk> chunks, int expectedDim) {
         List<float[]> vectors = new ArrayList<>(chunks.size());
-        for (VectorChunk chunk : chunks) {
+        for (EmbeddedChunk chunk : chunks) {
             vectors.add(extractVector(chunk, expectedDim));
         }
         return vectors;
     }
 
-    private float[] extractVector(VectorChunk chunk, int expectedDim) {
-        float[] vector = chunk.getEmbedding();
+    private float[] extractVector(EmbeddedChunk chunk, int expectedDim) {
+        float[] vector = chunk.embedding();
         if (vector == null || vector.length == 0) {
             throw new ClientException("向量不能为空");
         }
@@ -198,15 +198,14 @@ public class MilvusVectorStoreService implements VectorStoreService {
         return arr;
     }
 
-    private JsonObject buildMetadata(String docId, VectorChunk chunk) {
+    private JsonObject buildMetadata(String docId, EmbeddedChunk chunk) {
         JsonObject metadata = new JsonObject();
-        if (chunk.getMetadata() != null) {
-            chunk.getMetadata().forEach((k, v) -> metadata.add(k, GSON.toJsonTree(v)));
-        }
+        // 结构化元数据统一走唯一序列化点
+        chunk.metadata().toMap().forEach((k, v) -> metadata.add(k, GSON.toJsonTree(v)));
 
         // collection_name 已提升为顶层标量字段，不再冗余写入 metadata
         metadata.addProperty("doc_id", docId);
-        metadata.addProperty("chunk_index", chunk.getIndex());
+        metadata.addProperty("chunk_index", chunk.index());
         return metadata;
     }
 

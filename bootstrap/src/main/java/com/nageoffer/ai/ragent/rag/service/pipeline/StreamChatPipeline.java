@@ -35,6 +35,7 @@ import com.nageoffer.ai.ragent.rag.core.prompt.RAGPromptService;
 import com.nageoffer.ai.ragent.rag.core.retrieval.RetrievalEngine;
 import com.nageoffer.ai.ragent.rag.core.rewrite.QueryRewriteService;
 import com.nageoffer.ai.ragent.rag.core.rewrite.RewriteResult;
+import com.nageoffer.ai.ragent.rag.core.source.CitationContextEnricher;
 import com.nageoffer.ai.ragent.rag.core.source.GroundingChunksAssembler;
 import com.nageoffer.ai.ragent.rag.core.source.SourcesAssembler;
 import com.nageoffer.ai.ragent.rag.dto.IntentGroup;
@@ -74,6 +75,7 @@ public class StreamChatPipeline {
     private final StreamTaskManager taskManager;
     private final SourcesAssembler sourcesAssembler;
     private final GroundingChunksAssembler groundingChunksAssembler;
+    private final CitationContextEnricher citationContextEnricher;
 
     /**
      * 执行流式对话管道
@@ -173,9 +175,11 @@ public class StreamChatPipeline {
         // 聚合所有意图用于 prompt 规划
         IntentGroup mergedGroup = intentResolver.mergeIntentGroup(ctx.getSubIntents());
 
-        // 检索完成后先下发文档级来源（面板/预览用，不参与 prompt）
+        // 检索完成后建立唯一来源编号：同一列表用于完成事件、来源面板与消息落库，开启引用时还作为行内角标编号
         List<SourceRef> sources = sourcesAssembler.assemble(retrievalCtx.getIntentChunks());
         ctx.getCallback().onSources(sources);
+        // 开关关闭时这一步只负责清掉上下文里的内部 docId，不注入编号
+        retrievalCtx.setKbContext(citationContextEnricher.enrich(retrievalCtx.getKbContext(), sources));
 
         // 装配 grounding 片段随消息落库 供答案后推荐追问生成 grounding（不参与 prompt）
         ctx.getCallback().onGroundingChunks(groundingChunksAssembler.assemble(retrievalCtx.getIntentChunks()));

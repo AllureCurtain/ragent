@@ -50,16 +50,12 @@ public class KnowledgeDocumentUploadRequest {
     private String processMode;
 
     /**
-     * 分块策略：fixed_size / structure_aware
-     * 仅在 processMode=chunk 时有效
+     * 文档级摄取配置 JSON，仅在 processMode=chunk 时有效
+     * <p>
+     * 形如 {@code {"parseProfile":"fast","maxChars":512,"overlapChars":64,"rowsPerChunk":50}}，
+     * 缺省走系统默认预算
      */
-    private String chunkStrategy;
-
-    /**
-     * 分块参数JSON，processMode=chunk 时必传
-     * 如 {"chunkSize":512,"overlapSize":128} 或 {"targetChars":1400,"maxChars":1800,"minChars":600,"overlapChars":0}
-     */
-    private String chunkConfig;
+    private String ingestionSpec;
 
     /**
      * 数据通道（Pipeline）ID

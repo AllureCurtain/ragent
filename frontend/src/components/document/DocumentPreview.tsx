@@ -15,8 +15,27 @@ const SpreadsheetPreview = lazy(() =>
   import("@/components/admin/SpreadsheetPreview").then((m) => ({ default: m.SpreadsheetPreview }))
 );
 
+// docx-preview 只在预览 Word 时加载，避免增大知识库列表首包
+const DocxPreview = lazy(() =>
+  import("@/components/document/DocxPreview").then((m) => ({ default: m.DocxPreview }))
+);
+
+// pdf.js 同理，含 worker 体积不小
+const PdfPreview = lazy(() =>
+  import("@/components/document/PdfPreview").then((m) => ({ default: m.PdfPreview }))
+);
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
+export const isDocxType = (ext?: string | null) => (ext || "").toLowerCase() === "docx";
+
+export const isPreviewableType = (ext?: string | null) => {
+  const type = (ext || "").toLowerCase();
+  return ["pdf", "csv", "markdown", "txt"].includes(type)
+    || isDocxType(type)
+    || isSpreadsheetType(type)
+    || isImageType(type);
+};
 interface DocumentPreviewProps {
   docId: string;
   fileType?: string | null;
@@ -62,16 +81,18 @@ function DownloadFallback({ docId, docName, fileType }: DocumentPreviewProps) {
 
 /**
  * 文档预览：按文件类型直出原文件
- * pdf→iframe、xlsx/xls→表格预览、图片→img、csv→表格化 markdown、markdown→正文；其余类型给下载入口
+ * pdf→canvas、docx→HTML、xlsx/xls→表格预览、图片→img、csv→表格化 markdown、markdown→正文、txt→纯文本；其余类型给下载入口
  */
 export function DocumentPreview({ docId, fileType, docName }: DocumentPreviewProps) {
   const type = (fileType || "").toLowerCase();
   const isPdf = type === "pdf";
+  const isDocx = isDocxType(type);
   const isSheet = isSpreadsheetType(type);
   const isImage = isImageType(type);
   const isCsv = type === "csv";
   const isMarkdown = type === "markdown";
-  const needsText = isCsv || isMarkdown;
+  const isPlainText = type === "txt";
+  const needsText = isCsv || isMarkdown || isPlainText;
 
   const [content, setContent] = useState("");
   const [status, setStatus] = useState<"loading" | "done" | "error">("loading");
@@ -84,10 +105,11 @@ export function DocumentPreview({ docId, fileType, docName }: DocumentPreviewPro
     setStatus("loading");
     (async () => {
       try {
-        if (isCsv) {
+        if (isCsv || isPlainText) {
           const buffer = await fetchDocumentFile(docId);
           if (cancelled) return;
-          setContent(csvToMarkdown(new TextDecoder("utf-8").decode(buffer)));
+          const text = new TextDecoder("utf-8").decode(buffer);
+          setContent(isCsv ? csvToMarkdown(text) : text);
         } else {
           const text = await previewDocument(docId);
           if (cancelled) return;
@@ -101,12 +123,23 @@ export function DocumentPreview({ docId, fileType, docName }: DocumentPreviewPro
     return () => {
       cancelled = true;
     };
-  }, [docId, isCsv, needsText]);
+  }, [docId, isCsv, isPlainText, needsText]);
 
   const fileUrl = `${API_BASE_URL}/knowledge-base/docs/${docId}/file`;
 
   if (isPdf) {
-    return <iframe className="w-full flex-1 border-0" src={fileUrl} title={docName || ""} />;
+    return (
+      <Suspense fallback={<Centered>加载中…</Centered>}>
+        <PdfPreview docId={docId} />
+      </Suspense>
+    );
+  }
+  if (isDocx) {
+    return (
+      <Suspense fallback={<Centered>加载中…</Centered>}>
+        <DocxPreview docId={docId} />
+      </Suspense>
+    );
   }
   if (isSheet) {
     return (
@@ -130,6 +163,13 @@ export function DocumentPreview({ docId, fileType, docName }: DocumentPreviewPro
   }
   if (status === "error") {
     return <DownloadFallback docId={docId} docName={docName} fileType={fileType} />;
+  }
+  if (isPlainText) {
+    return (
+      <div className="flex-1 overflow-auto px-6 py-4">
+        <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-6 text-foreground">{content}</pre>
+      </div>
+    );
   }
   const { head, body } = parseFrontMatter(content);
   return (

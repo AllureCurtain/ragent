@@ -18,11 +18,9 @@
 package com.nageoffer.ai.ragent.knowledge.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
-import com.nageoffer.ai.ragent.core.chunk.ChunkingMode;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeBaseCreateRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeBasePageRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeBaseUpdateRequest;
-import com.nageoffer.ai.ragent.knowledge.controller.vo.ChunkStrategyVO;
 import com.nageoffer.ai.ragent.knowledge.controller.vo.KnowledgeBaseVO;
 import com.nageoffer.ai.ragent.framework.convention.Result;
 import com.nageoffer.ai.ragent.framework.web.Results;
@@ -35,9 +33,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
-
-import java.util.Arrays;
-import java.util.List;
 
 /**
  * 知识库控制器
@@ -90,17 +85,5 @@ public class KnowledgeBaseController {
     @GetMapping("/knowledge-base")
     public Result<IPage<KnowledgeBaseVO>> pageQuery(KnowledgeBasePageRequest requestParam) {
         return Results.success(knowledgeBaseService.pageQuery(requestParam));
-    }
-
-    /**
-     * 查询支持的分块策略列表
-     */
-    @GetMapping("/knowledge-base/chunk-strategies")
-    public Result<List<ChunkStrategyVO>> listChunkStrategies() {
-        List<ChunkStrategyVO> list = Arrays.stream(ChunkingMode.values())
-                .filter(ChunkingMode::isVisible)
-                .map(mode -> new ChunkStrategyVO(mode.getValue(), mode.getLabel(), mode.getDefaultConfig()))
-                .toList();
-        return Results.success(list);
     }
 }

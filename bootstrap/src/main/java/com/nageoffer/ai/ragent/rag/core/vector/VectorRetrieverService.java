@@ -92,12 +92,21 @@ public interface VectorRetrieverService {
      * <p>
      * 注意：
      * - 调用方负责确保 vector 维度与向量库 schema 保持一致
+     * - 实现不得修改调用方传入的查询向量
      *
      * @param vector        查询向量（如 float[4096]）
      * @param retrieveParam 向量检索请求参数
      * @return RetrievedChunk 列表（按相似度排序）
      */
     List<RetrievedChunk> retrieveByVector(float[] vector, RetrieveRequest retrieveParam);
+
+    /**
+     * 根据自然语言 Query 生成并归一化查询向量
+     *
+     * @param query 用户自然语言问题
+     * @return 最终用于向量数据库查询的向量
+     */
+    float[] embedAndNormalize(String query);
 
     /**
      * 是否支持单次全局检索

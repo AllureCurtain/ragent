@@ -26,7 +26,7 @@ import com.nageoffer.ai.ragent.ingestion.domain.pipeline.NodeConfig;
 import com.nageoffer.ai.ragent.ingestion.domain.result.NodeResult;
 import com.nageoffer.ai.ragent.ingestion.strategy.fetcher.DocumentFetcher;
 import com.nageoffer.ai.ragent.ingestion.strategy.fetcher.FetchResult;
-import com.nageoffer.ai.ragent.ingestion.util.MimeTypeDetector;
+import com.nageoffer.ai.ragent.core.parser.mime.MimeTypeDetector;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 

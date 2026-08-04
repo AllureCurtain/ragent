@@ -17,7 +17,7 @@
 
 package com.nageoffer.ai.ragent.rag.core.vector;
 
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
 
 import java.util.List;
 
@@ -33,7 +33,7 @@ public interface VectorStoreService {
      * @param docId          文档唯一标识
      * @param chunks         文档切片列表，须包含已计算好的 embedding
      */
-    void indexDocumentChunks(String collectionName, String docId, List<VectorChunk> chunks);
+    void indexDocumentChunks(String collectionName, String docId, List<EmbeddedChunk> chunks);
 
     /**
      * 更新单个 chunk 的向量索引
@@ -42,7 +42,7 @@ public interface VectorStoreService {
      * @param docId          文档唯一标识
      * @param chunk          待更新的文档切片，须包含最新的 embedding
      */
-    void updateChunk(String collectionName, String docId, VectorChunk chunk);
+    void updateChunk(String collectionName, String docId, EmbeddedChunk chunk);
 
     /**
      * 删除文档的所有向量索引

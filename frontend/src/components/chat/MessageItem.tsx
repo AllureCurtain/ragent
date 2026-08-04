@@ -99,7 +99,13 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
               </span>
             </div>
           ) : null}
-          {hasContent ? <MarkdownRenderer content={message.content} /> : null}
+          {hasContent ? (
+            <MarkdownRenderer
+              content={message.content}
+              messageId={message.id}
+              sources={message.sources}
+            />
+          ) : null}
           {message.status === "error" ? (
             <p className="rounded-lg bg-destructive/8 px-3 py-2 text-xs text-destructive">
               回答生成已中断，请重新发送问题。若问题持续出现，请联系管理员检查模型服务。

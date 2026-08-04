@@ -32,15 +32,12 @@ public class KnowledgeDocumentUpdateRequest {
      */
     private String processMode;
 
-    /**
-     * 分块策略（CHUNK 模式），如 fixed_size、structure_aware
-     */
-    private String chunkStrategy;
 
     /**
-     * 分块参数 JSON（CHUNK 模式），如 {"chunkSize":512,"overlapSize":128}
+     * 摄取配置 JSON（CHUNK 模式），如 {"parseProfile":"fast","maxChars":1024,"overlapChars":128}，
+     * 字段可缺省，落库前由 IngestionSpecCodec 校验并归一化
      */
-    private String chunkConfig;
+    private String ingestionSpec;
 
     /**
      * Pipeline ID（PIPELINE 模式）

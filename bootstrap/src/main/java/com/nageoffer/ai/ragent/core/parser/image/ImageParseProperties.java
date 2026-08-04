@@ -39,4 +39,11 @@ public class ImageParseProperties {
      * 描述输出 token 上限,控成本与 embedding 体量;<=0 表示不限制
      */
     private Integer maxOutputTokens = 1024;
+
+    /**
+     * 是否给文档内嵌图也做图生文
+     * <p>
+     * 关掉则内嵌图的向量文本回落成一条图片 URL，等于永远召回不到;开着的代价是每张图一次 VLM 调用
+     */
+    private boolean embeddedDescribeEnabled = true;
 }

@@ -82,6 +82,14 @@ public class KnowledgeChunkDO {
     private Integer tokenCount;
 
     /**
+     * 向量文本：章节路径 + 正文
+     * <p>
+     * 落库不是为了展示——它是重建向量的唯一正确来源：结构信息（章节路径、表格的 {@code 列名: 值}
+     * 渲染、图片去 URL 后的描述）只存在于这一列，用 content 重算会静默丢掉它们
+     */
+    private String embeddingText;
+
+    /**
      * 是否启用 0：禁用 1：启用
      */
     private Integer enabled;

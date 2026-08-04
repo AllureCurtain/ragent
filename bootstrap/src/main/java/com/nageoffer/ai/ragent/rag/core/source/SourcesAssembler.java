@@ -36,7 +36,7 @@ import java.util.Map;
  * 回答来源装配器
  * <p>
  * 把检索片段（KB 命中）按文档去重、按相关度赋号，补齐来源类型与外部链接，
- * 产出文档级来源列表。该列表既用于 SSE 下发/面板展示，也作为将来行内角标的唯一编号源
+ * 产出文档级来源列表。该列表既用于 SSE 下发/面板展示，也作为行内角标的唯一编号源
  */
 @Component
 @RequiredArgsConstructor
@@ -46,11 +46,6 @@ public class SourcesAssembler {
      * 摘录最大长度 超出以省略号截断
      */
     private static final int EXCERPT_MAX_LENGTH = 100;
-
-    /**
-     * 来源条数上限 防止极端场景面板过长
-     */
-    private static final int MAX_SOURCES = 20;
 
     private static final String SOURCE_TYPE_URL = "url";
     private static final String SOURCE_TYPE_FEISHU = "feishu";
@@ -80,10 +75,10 @@ public class SourcesAssembler {
             return List.of();
         }
 
-        // 按最高分降序 取上限
+        // 按最高分降序排列；所有进入上下文的文档都必须能获得引用编号
         List<RetrievedChunk> ordered = bestByDoc.values().stream()
-                .sorted(Comparator.comparingDouble(SourcesAssembler::score).reversed())
-                .limit(MAX_SOURCES)
+                .sorted(Comparator.comparingDouble(SourcesAssembler::score).reversed()
+                        .thenComparing(RetrievedChunk::getDocId))
                 .toList();
 
         // 批量补齐来源类型与外部链接

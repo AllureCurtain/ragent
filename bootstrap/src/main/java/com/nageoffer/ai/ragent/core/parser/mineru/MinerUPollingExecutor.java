@@ -35,14 +35,10 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * MinerU 共享轮询调度器
+ * MinerU 共享轮询调度器：把 HTTP 轮询从业务消费者线程剥离到独立调度池
  * <p>
- * B-lite 异步模型核心组件:把 HTTP 轮询从业务消费者线程剥离到独立调度池。
- * 全局 outstanding 并发由 {@link MinerUDocumentParser} 的分布式信号量控制。
- * <ul>
- *   <li>消费者线程仍阻塞 await(B-lite 本质,与真 B 区别)</li>
- *   <li>轮询动作由 4 个共享调度线程执行,数百个 outstanding 任务共用</li>
- * </ul>
+ * 消费者线程仍阻塞在 await 上，只是轮询动作交给 {@link #SCHEDULER_THREADS} 个共享调度线程执行，
+ * 数百个 outstanding 任务共用；全局 outstanding 并发由 {@link MinerUDocumentParser} 的分布式信号量控制
  */
 @Slf4j
 @Component

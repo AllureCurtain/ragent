@@ -41,7 +41,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -107,10 +109,17 @@ public class RetrievalEngine {
                 .map(CompletableFuture::join)
                 .toList();
 
-        Map<String, List<RetrievedChunk>> mergedIntentChunks = new HashMap<>();
+        Map<String, List<RetrievedChunk>> mergedIntentChunks = new LinkedHashMap<>();
         for (SubQuestionContext context : contexts) {
             if (CollUtil.isNotEmpty(context.intentChunks())) {
-                mergedIntentChunks.putAll(context.intentChunks());
+                context.intentChunks().forEach((intentId, chunks) -> {
+                    if (CollUtil.isEmpty(chunks)) {
+                        return;
+                    }
+                    mergedIntentChunks
+                            .computeIfAbsent(intentId, ignored -> new ArrayList<>())
+                            .addAll(chunks);
+                });
             }
         }
 
@@ -197,7 +206,7 @@ public class RetrievalEngine {
         }
 
         // 按意图节点分组（用于格式化上下文）
-        Map<String, List<RetrievedChunk>> intentChunks = new HashMap<>();
+        Map<String, List<RetrievedChunk>> intentChunks = new LinkedHashMap<>();
 
         // 如果有意图识别结果，按意图节点 ID 分组
         if (CollUtil.isNotEmpty(kbIntents)) {

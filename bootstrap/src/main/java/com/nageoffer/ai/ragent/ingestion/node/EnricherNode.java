@@ -19,7 +19,7 @@ package com.nageoffer.ai.ragent.ingestion.node;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.ingestion.domain.context.IngestionContext;
@@ -62,7 +62,7 @@ public class EnricherNode implements IngestionNode {
 
     @Override
     public NodeResult execute(IngestionContext context, NodeConfig config) {
-        List<VectorChunk> chunks = context.getChunks();
+        List<EmbeddedChunk> chunks = context.getChunks();
         if (chunks == null || chunks.isEmpty()) {
             return NodeResult.ok("No chunks to enrich");
         }
@@ -71,15 +71,18 @@ public class EnricherNode implements IngestionNode {
             return NodeResult.ok("No enricher tasks configured");
         }
         boolean attachMetadata = settings.getAttachDocumentMetadata() == null || settings.getAttachDocumentMetadata();
-        for (VectorChunk chunk : chunks) {
-            if (chunk == null || !StringUtils.hasText(chunk.getContent())) {
+        // 块不可变：加工产物收集到扩展位，最后整块替换，而不是原地改一个自由 Map
+        List<EmbeddedChunk> enriched = new java.util.ArrayList<>(chunks.size());
+        for (EmbeddedChunk chunk : chunks) {
+            if (chunk == null || !StringUtils.hasText(chunk.content())) {
+                if (chunk != null) {
+                    enriched.add(chunk);
+                }
                 continue;
             }
-            if (chunk.getMetadata() == null) {
-                chunk.setMetadata(new HashMap<>());
-            }
+            Map<String, Object> extras = new HashMap<>();
             if (attachMetadata && context.getMetadata() != null) {
-                chunk.getMetadata().putAll(context.getMetadata());
+                extras.putAll(context.getMetadata());
             }
             for (EnricherSettings.ChunkEnrichTask task : settings.getTasks()) {
                 if (task == null || task.getType() == null) {
@@ -97,9 +100,14 @@ public class EnricherNode implements IngestionNode {
                         ))
                         .build();
                 String response = chat(request, settings.getModelId());
-                applyResult(chunk, type, response);
+                applyResult(extras, type, response);
             }
+            enriched.add(extras.isEmpty()
+                    ? chunk
+                    : new EmbeddedChunk(chunk.chunk().withMetadata(chunk.metadata().withExtras(extras)),
+                            chunk.embedding()));
         }
+        context.setChunks(enriched);
         return NodeResult.ok("Enricher completed");
     }
 
@@ -110,26 +118,25 @@ public class EnricherNode implements IngestionNode {
         return objectMapper.convertValue(node, EnricherSettings.class);
     }
 
-    private String buildUserPrompt(String template, VectorChunk chunk, IngestionContext context) {
-        String input = chunk.getContent();
+    private String buildUserPrompt(String template, EmbeddedChunk chunk, IngestionContext context) {
+        String input = chunk.content();
         if (!StringUtils.hasText(template)) {
             return input;
         }
         Map<String, Object> vars = new HashMap<>();
         vars.put("text", input);
         vars.put("content", input);
-        vars.put("chunkIndex", chunk.getIndex());
+        vars.put("chunkIndex", chunk.index());
         vars.put("taskId", context.getTaskId());
         vars.put("pipelineId", context.getPipelineId());
         return PromptTemplateRenderer.render(template, vars);
     }
 
-    private void applyResult(VectorChunk chunk, ChunkEnrichType type, String response) {
+    private void applyResult(Map<String, Object> extras, ChunkEnrichType type, String response) {
         switch (type) {
-            case KEYWORDS -> chunk.getMetadata().put("keywords", JsonResponseParser.parseStringList(response));
-            case SUMMARY ->
-                    chunk.getMetadata().put("summary", StringUtils.hasText(response) ? response.trim() : response);
-            case METADATA -> chunk.getMetadata().putAll(JsonResponseParser.parseObject(response));
+            case KEYWORDS -> extras.put("keywords", JsonResponseParser.parseStringList(response));
+            case SUMMARY -> extras.put("summary", StringUtils.hasText(response) ? response.trim() : response);
+            case METADATA -> extras.putAll(JsonResponseParser.parseObject(response));
             default -> {
             }
         }

@@ -17,7 +17,7 @@
 
 package com.nageoffer.ai.ragent.rag.core.vector.decorator;
 
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
 import com.nageoffer.ai.ragent.rag.core.graph.LightRagClient;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorStoreService;
 import lombok.extern.slf4j.Slf4j;
@@ -28,16 +28,11 @@ import java.util.stream.Collectors;
 /**
  * 向量写入的图谱同步装饰器
  * <p>
- * 与 {@link KeywordSyncingVectorStoreService} 同构：包裹真实的 {@link VectorStoreService}，
- * 在向量写入 / 删除成功后，同步维护 LightRAG 知识图谱，一处覆盖全部向量写调用点，无需改动任何调用方
- * <p>
- * 粒度：图谱抽取是文档级（跨 chunk 合并实体），故按文档同步，而非逐块
- * - indexDocumentChunks：以在手全量分块拼成全文写入（摄取 / 重建路径天然携带该文档全量分块）
- * - deleteDocumentVectors：按文档清除图谱；文档重建路径「先删后建」的既有调用顺序天然构成 upsert，无需额外去重
- * - updateChunk / deleteChunkById / deleteChunksByIds：子文档粒度，Phase1 不单独同步图谱
- *   （属稀有的人工分块编辑，整文重摄可刷新；避免为其引入 chunkId→docId 反查与文档级重建的额外机制）
- * <p>
- * 图谱写入为 best-effort：失败只记日志、不回滚向量、不中断主链路，因为图谱检索是增强而非必须能力
+ * 与 {@link KeywordSyncingVectorStoreService} 同构，包裹真实的 {@link VectorStoreService}，写入 / 删除
+ * 成功后同步维护 LightRAG 知识图谱；图谱抽取是文档级（跨 chunk 合并实体）故按文档同步，写入以在手全量
+ * 分块拼成全文，删除按文档清除，重建路径「先删后建」的既有调用顺序天然构成 upsert；单块粒度的
+ * updateChunk / deleteChunkById / deleteChunksByIds 不同步图谱，整文重摄即可刷新，不为它引入
+ * chunkId→docId 反查；图谱写入 best-effort，失败只记日志、不回滚向量、不中断主链路
  */
 @Slf4j
 public class GraphSyncingVectorStoreService implements VectorStoreService {
@@ -51,13 +46,13 @@ public class GraphSyncingVectorStoreService implements VectorStoreService {
     }
 
     @Override
-    public void indexDocumentChunks(String collectionName, String docId, List<VectorChunk> chunks) {
+    public void indexDocumentChunks(String collectionName, String docId, List<EmbeddedChunk> chunks) {
         delegate.indexDocumentChunks(collectionName, docId, chunks);
         syncGraph(docId, () -> lightRagClient.insertText(concatContent(chunks), fileSource(collectionName, docId)));
     }
 
     @Override
-    public void updateChunk(String collectionName, String docId, VectorChunk chunk) {
+    public void updateChunk(String collectionName, String docId, EmbeddedChunk chunk) {
         delegate.updateChunk(collectionName, docId, chunk);
         // 子文档粒度，Phase1 不单独同步图谱（见类注释）
     }
@@ -91,12 +86,12 @@ public class GraphSyncingVectorStoreService implements VectorStoreService {
     /**
      * 拼接分块正文为文档全文，空白分块跳过
      */
-    private String concatContent(List<VectorChunk> chunks) {
+    private String concatContent(List<EmbeddedChunk> chunks) {
         if (chunks == null || chunks.isEmpty()) {
             return "";
         }
         return chunks.stream()
-                .map(VectorChunk::getContent)
+                .map(EmbeddedChunk::content)
                 .filter(c -> c != null && !c.isBlank())
                 .collect(Collectors.joining("\n\n"));
     }

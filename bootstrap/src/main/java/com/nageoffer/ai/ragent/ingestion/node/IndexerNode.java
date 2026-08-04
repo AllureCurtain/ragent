@@ -17,15 +17,9 @@
 
 package com.nageoffer.ai.ragent.ingestion.node;
 
-import cn.hutool.core.util.IdUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.nageoffer.ai.ragent.rag.config.RAGDefaultProperties;
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.ingestion.domain.context.DocumentSource;
 import com.nageoffer.ai.ragent.ingestion.domain.context.IngestionContext;
@@ -33,6 +27,7 @@ import com.nageoffer.ai.ragent.ingestion.domain.enums.IngestionNodeType;
 import com.nageoffer.ai.ragent.ingestion.domain.pipeline.NodeConfig;
 import com.nageoffer.ai.ragent.ingestion.domain.result.NodeResult;
 import com.nageoffer.ai.ragent.ingestion.domain.settings.IndexerSettings;
+import com.nageoffer.ai.ragent.rag.config.RAGDefaultProperties;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorSpaceId;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorSpaceSpec;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorStoreAdmin;
@@ -41,20 +36,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 索引节点类，负责将处理后的文档分块数据索引到向量数据库中
- * 该类实现了 {@link IngestionNode} 接口，是数据摄入流水线中的关键节点
- * 主要功能包括：解析配置、生成向量嵌入、确保向量空间存在以及将数据批量插入到 Milvus 等向量数据库
+ * 索引节点：把已向量化的块写入向量存储
+ * <p>
+ * 直接写块，元数据统一走块自己的序列化点，管道注入的字段（任务 ID、来源等）落进元数据扩展位；维度
+ * 校验不在此重复，向量化阶段已按部署级维度逐条校验，块类型本身也保证向量非空
  */
 @Slf4j
 @Component
 public class IndexerNode implements IngestionNode {
-
-    private static final Gson GSON = new Gson();
 
     private final ObjectMapper objectMapper;
     private final VectorStoreAdmin vectorStoreAdmin;
@@ -78,37 +73,28 @@ public class IndexerNode implements IngestionNode {
 
     @Override
     public NodeResult execute(IngestionContext context, NodeConfig config) {
-        List<VectorChunk> chunks = context.getChunks();
+        List<EmbeddedChunk> chunks = context.getChunks();
         if (chunks == null || chunks.isEmpty()) {
             return NodeResult.fail(new ClientException("没有可索引的分块"));
         }
         IndexerSettings settings = parseSettings(config.getSettings());
-        String collectionName = resolveCollectionName(context);
-        if (!StringUtils.hasText(collectionName)) {
+        String partition = resolvePartition(context);
+        if (!StringUtils.hasText(partition)) {
             return NodeResult.fail(new ClientException("索引器需要指定集合名称"));
         }
 
-        int expectedDim = resolveDimension(chunks);
-        if (expectedDim <= 0) {
-            return NodeResult.fail(new ClientException("未配置向量维度"));
-        }
-        float[][] vectorArray;
-        try {
-            vectorArray = toArrayFromChunks(chunks, expectedDim);
-        } catch (ClientException ex) {
-            return NodeResult.fail(ex);
-        }
-
-        ensureVectorSpace(collectionName);
-        List<JsonObject> rows = buildRows(context, chunks, vectorArray, settings.getMetadataFields());
+        List<EmbeddedChunk> enriched = attachPipelineMetadata(context, chunks, settings.getMetadataFields());
+        context.setChunks(enriched);
 
         if (context.isSkipIndexerWrite()) {
-            // 调用方会在事务中统一写向量，此处只做校验和 chunkId/embedding 的填充（buildRows 已完成）
-            return NodeResult.ok("已准备 " + rows.size() + " 个分块（向量写入由调用方统一完成）");
+            // 调用方会在事务中统一写向量，此处只做准备
+            return NodeResult.ok("已准备 " + enriched.size() + " 个分块（向量写入由调用方统一完成）");
         }
 
-        insertRows(collectionName, context.getTaskId(), rows);
-        return NodeResult.ok("已写入 " + rows.size() + " 个分块到集合 " + collectionName);
+        ensureVectorSpace(partition);
+        vectorStoreService.indexDocumentChunks(partition, context.getTaskId(), enriched);
+        log.info("向量写入成功，集合={}，行数={}", partition, enriched.size());
+        return NodeResult.ok("已写入 " + enriched.size() + " 个分块到集合 " + partition);
     }
 
     private IndexerSettings parseSettings(JsonNode node) {
@@ -118,168 +104,67 @@ public class IndexerNode implements IngestionNode {
         return objectMapper.convertValue(node, IndexerSettings.class);
     }
 
-    private String resolveCollectionName(IngestionContext context) {
+    private String resolvePartition(IngestionContext context) {
+        if (context.getVectorTarget() != null) {
+            return context.getVectorTarget().partition();
+        }
         if (context.getVectorSpaceId() != null && StringUtils.hasText(context.getVectorSpaceId().getLogicalName())) {
             return context.getVectorSpaceId().getLogicalName();
         }
         return ragDefaultProperties.getCollectionName();
     }
 
-    private void ensureVectorSpace(String collectionName) {
-        boolean vectorSpaceExists = vectorStoreAdmin.vectorSpaceExists(VectorSpaceId.builder()
-                .logicalName(collectionName)
-                .build());
-        if (vectorSpaceExists) {
-            return;
+    /**
+     * 把管道级信息写进块元数据的扩展位
+     * <p>
+     * {@code metadataFields} 为空时注入全部管道级字段；配置了白名单则只注入命中的字段
+     */
+    private List<EmbeddedChunk> attachPipelineMetadata(IngestionContext context,
+                                                       List<EmbeddedChunk> chunks,
+                                                       List<String> metadataFields) {
+        Map<String, Object> pipelineMetadata = new LinkedHashMap<>();
+        putIfPresent(pipelineMetadata, "task_id", context.getTaskId());
+        putIfPresent(pipelineMetadata, "pipeline_id", context.getPipelineId());
+        DocumentSource source = context.getSource();
+        if (source != null) {
+            if (source.getType() != null) {
+                pipelineMetadata.put("source_type", source.getType().getValue());
+            }
+            putIfPresent(pipelineMetadata, "source_location", source.getLocation());
         }
-
-        VectorSpaceSpec spaceSpec = VectorSpaceSpec.builder()
-                .spaceId(VectorSpaceId.builder()
-                        .logicalName(collectionName)
-                        .build())
-                .remark("RAG向量存储空间")
-                .build();
-        vectorStoreAdmin.ensureVectorSpace(spaceSpec);
-    }
-
-    private void insertRows(String collectionName, String docId, List<JsonObject> rows) {
-        if (rows == null || rows.isEmpty()) {
-            return;
-        }
-
-        // 将 JsonObject 转换为 VectorChunk 列表
-        List<VectorChunk> chunks = rows.stream().map(row -> {
-            String chunkId = row.get("id").getAsString();
-            String content = row.get("content").getAsString();
-            JsonArray embeddingArray = row.getAsJsonArray("embedding");
-            float[] embedding = new float[embeddingArray.size()];
-            for (int i = 0; i < embeddingArray.size(); i++) {
-                embedding[i] = embeddingArray.get(i).getAsFloat();
-            }
-
-            Integer chunkIndex = null;
-            if (row.has("metadata") && row.get("metadata").isJsonObject()) {
-                JsonObject metadata = row.getAsJsonObject("metadata");
-                if (metadata.has("chunk_index")) {
-                    chunkIndex = metadata.get("chunk_index").getAsInt();
-                }
-            }
-
-            return VectorChunk.builder()
-                    .chunkId(chunkId)
-                    .content(content)
-                    .index(chunkIndex)
-                    .embedding(embedding)
-                    .build();
-        }).toList();
-
-        vectorStoreService.indexDocumentChunks(collectionName, docId, chunks);
-
-        log.info("向量写入成功，集合={}，行数={}", collectionName, chunks.size());
-    }
-
-    private int resolveDimension(List<VectorChunk> chunks) {
-        Integer configured = ragDefaultProperties.getDimension();
-        if (configured != null && configured > 0) {
-            return configured;
-        }
-        for (VectorChunk chunk : chunks) {
-            if (chunk.getEmbedding() != null && chunk.getEmbedding().length > 0) {
-                return chunk.getEmbedding().length;
-            }
-        }
-        return 0;
-    }
-
-    private float[][] toArrayFromChunks(List<VectorChunk> chunks, int expectedDim) {
-        float[][] out = new float[chunks.size()][];
-        for (int i = 0; i < chunks.size(); i++) {
-            float[] vector = chunks.get(i).getEmbedding();
-            if (vector == null || vector.length == 0) {
-                throw new ClientException("向量结果缺失，索引: " + i);
-            }
-            if (expectedDim > 0 && vector.length != expectedDim) {
-                throw new ClientException("向量维度不匹配，索引: " + i);
-            }
-            out[i] = vector;
-        }
-        return out;
-    }
-
-    private List<JsonObject> buildRows(IngestionContext context,
-                                       List<VectorChunk> chunks,
-                                       float[][] vectors,
-                                       List<String> metadataFields) {
-        Map<String, Object> mergedMetadata = mergeMetadata(context);
-        List<JsonObject> rows = new java.util.ArrayList<>(chunks.size());
-        for (int i = 0; i < chunks.size(); i++) {
-            VectorChunk chunk = chunks.get(i);
-            String chunkId = StringUtils.hasText(chunk.getChunkId()) ? chunk.getChunkId() : IdUtil.getSnowflakeNextIdStr();
-            chunk.setChunkId(chunkId);
-            chunk.setEmbedding(vectors[i]);
-
-            // 使用原始内容作为存储内容，而不是用于embedding的文本
-            String content = chunk.getContent() == null ? "" : chunk.getContent();
-            if (content.length() > 65535) {
-                content = content.substring(0, 65535);
-            }
-
-            JsonObject metadata = new JsonObject();
-            metadata.addProperty("chunk_index", chunk.getIndex());
-            metadata.addProperty("task_id", context.getTaskId());
-            metadata.addProperty("pipeline_id", context.getPipelineId());
-            DocumentSource source = context.getSource();
-            if (source != null && source.getType() != null) {
-                metadata.addProperty("source_type", source.getType().getValue());
-            }
-            if (source != null && StringUtils.hasText(source.getLocation())) {
-                metadata.addProperty("source_location", source.getLocation());
-            }
-
-            if (metadataFields != null && !metadataFields.isEmpty()) {
-                Map<String, Object> combined = new HashMap<>(mergedMetadata);
-                if (chunk.getMetadata() != null) {
-                    combined.putAll(chunk.getMetadata());
-                }
-                for (String field : metadataFields) {
-                    if (!StringUtils.hasText(field)) {
-                        continue;
-                    }
-                    Object value = combined.get(field);
-                    if (value != null) {
-                        addMetadataValue(metadata, field, value);
-                    }
-                }
-            }
-
-            JsonObject row = new JsonObject();
-            row.addProperty("id", chunkId);
-            row.addProperty("content", content);
-            row.add("metadata", metadata);
-            row.add("embedding", toJsonArray(vectors[i]));
-            rows.add(row);
-        }
-        return rows;
-    }
-
-    private Map<String, Object> mergeMetadata(IngestionContext context) {
-        Map<String, Object> merged = new HashMap<>();
         if (context.getMetadata() != null) {
-            merged.putAll(context.getMetadata());
+            pipelineMetadata.putAll(context.getMetadata());
         }
-        return merged;
+        if (metadataFields != null && !metadataFields.isEmpty()) {
+            pipelineMetadata.keySet().retainAll(metadataFields);
+        }
+        if (pipelineMetadata.isEmpty()) {
+            return chunks;
+        }
+
+        List<EmbeddedChunk> result = new ArrayList<>(chunks.size());
+        for (EmbeddedChunk chunk : chunks) {
+            result.add(new EmbeddedChunk(
+                    chunk.chunk().withMetadata(chunk.metadata().withExtras(pipelineMetadata)),
+                    chunk.embedding()));
+        }
+        return result;
     }
 
-    private void addMetadataValue(JsonObject metadata, String field, Object value) {
-        JsonElement element = GSON.toJsonTree(value);
-        metadata.add(field, element);
+    private static void putIfPresent(Map<String, Object> map, String key, String value) {
+        if (StringUtils.hasText(value)) {
+            map.put(key, value);
+        }
     }
 
-    private JsonArray toJsonArray(float[] vector) {
-        JsonArray arr = new JsonArray(vector.length);
-        for (float v : vector) {
-            arr.add(v);
+    private void ensureVectorSpace(String partition) {
+        VectorSpaceId spaceId = VectorSpaceId.builder().logicalName(partition).build();
+        if (vectorStoreAdmin.vectorSpaceExists(spaceId)) {
+            return;
         }
-        return arr;
+        vectorStoreAdmin.ensureVectorSpace(VectorSpaceSpec.builder()
+                .spaceId(spaceId)
+                .remark("RAG向量存储空间")
+                .build());
     }
 }

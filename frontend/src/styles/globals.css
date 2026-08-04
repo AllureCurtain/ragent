@@ -4150,4 +4150,36 @@ textarea {
     align-items: flex-start;
     flex-direction: column;
   }
+
+/* docx-preview 会往容器里注入灰底纸张外框，这里压平成与 txt/markdown 一致的连续正文流
+   注入的 style 标签在文档流中晚于本文件，靠 .docx-host 提权覆盖而非 !important
+   文档页边距可能小到 0，留白交给 .docx-host 的内边距，wrapper 只负责限制行宽 */
+.docx-host .docx-wrapper {
+  display: block;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0;
+  background: transparent;
+}
+
+.docx-host .docx-wrapper > section.docx {
+  background: transparent;
+  box-shadow: none;
+  margin: 0;
+}
+
+/* docx / pdf 去掉纸张外框后靠它区分页与页 */
+.doc-page-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #999999;
+}
+
+.doc-page-divider::before,
+.doc-page-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border-default);
 }

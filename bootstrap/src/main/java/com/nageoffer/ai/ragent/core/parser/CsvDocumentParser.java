@@ -20,10 +20,9 @@ package com.nageoffer.ai.ragent.core.parser;
 import com.nageoffer.ai.ragent.core.parser.model.ParsedDocument;
 import com.nageoffer.ai.ragent.core.parser.model.Provenance;
 import com.nageoffer.ai.ragent.core.parser.model.TableBlock;
+import com.nageoffer.ai.ragent.core.parser.registry.ParseProfile;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.detect.AutoDetectReader;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
@@ -31,27 +30,17 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.UUID;
+import java.util.Set;
 
 /**
- * CSV 文档解析器
- * <p>
- * 把 CSV 当作一张规整的 key-val 表：首行为表头，其余为数据行，产出单个 {@link TableBlock}，
+ * CSV 文档解析器：把 CSV 当作一张规整的 key-val 表，首行表头、其余数据行，产出单个 {@link TableBlock}，
  * 下游与 Excel 共用 TableChunker 做行级切分 + key-value 嵌入
- * <ul>
- *   <li>字符集：用 Tika {@link AutoDetectReader} 自动探测（兼容 UTF-8 / GBK / UTF-16 等），并剥离 BOM</li>
- *   <li>结构：RFC4180 解析，支持引号包裹字段、字段内逗号 / 换行、{@code ""} 转义</li>
- *   <li>对齐：数据行短于表头时右侧补空，保证列对齐</li>
- *   <li>全空行跳过</li>
- * </ul>
  * <p>
- * 优先级高于 Tika（{@code text/csv} 已从 Tika 排除），避免 CSV 被当平文本切碎
+ * 认领精确 MIME 以优先于 Tika 的 {@code text/*} 通配，避免 CSV 被当平文本切碎
  */
 @Slf4j
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class CsvDocumentParser implements DocumentParser {
 
     public static final String OPT_SOURCE_FILE = "sourceFile";
@@ -64,14 +53,12 @@ public class CsvDocumentParser implements DocumentParser {
     }
 
     @Override
-    public boolean supports(String mimeType) {
-        if (mimeType == null) {
-            return false;
-        }
-        String lower = mimeType.toLowerCase(Locale.ROOT);
-        return lower.equals("text/csv")
-                || lower.equals("application/csv")
-                || lower.equals("text/comma-separated-values");
+    public Map<ParseProfile, Set<String>> supportedMimeTypes() {
+        return Map.of(ParseProfile.FAST, Set.of(
+                "text/csv",
+                "application/csv",
+                "text/comma-separated-values"
+        ));
     }
 
     @Override
@@ -95,7 +82,7 @@ public class CsvDocumentParser implements DocumentParser {
         }
 
         Provenance prov = Provenance.ofFile(extractSourceFile(options));
-        TableBlock block = new TableBlock(UUID.randomUUID().toString(), prov, List.of(), headers, rows, null);
+        TableBlock block = new TableBlock(prov, headers, rows);
         return ParsedDocument.of(List.of(block), Map.of(
                 "parser", getParserType(),
                 "mimeType", mimeType == null ? "" : mimeType,
@@ -105,7 +92,8 @@ public class CsvDocumentParser implements DocumentParser {
     }
 
     /**
-     * 自动探测字符集解码为文本，失败回退 UTF-8；统一剥离开头 BOM
+     * 用 Tika {@link AutoDetectReader} 探测字符集解码（兼容 UTF-8 / GBK / UTF-16 等），
+     * 失败回退 UTF-8；统一剥离开头 BOM
      */
     private String decode(byte[] content) {
         try (Reader reader = new AutoDetectReader(new ByteArrayInputStream(content))) {

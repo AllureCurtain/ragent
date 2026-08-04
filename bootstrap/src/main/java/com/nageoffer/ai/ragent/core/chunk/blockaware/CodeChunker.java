@@ -17,8 +17,8 @@
 
 package com.nageoffer.ai.ragent.core.chunk.blockaware;
 
-import cn.hutool.core.util.IdUtil;
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.ChunkDraft;
+import com.nageoffer.ai.ragent.core.chunk.model.ChunkMetadata;
 import com.nageoffer.ai.ragent.core.parser.model.CodeBlock;
 import org.springframework.stereotype.Component;
 
@@ -26,32 +26,64 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 代码块 chunker：每个 CodeBlock 产生一个 atomic VectorChunk
+ * 代码块 chunker：优先整块保留，超出容忍上限才按行边界降级切分，每块重复围栏
  * <p>
- * 永不切分 —— 代码块语法对完整性敏感（缺少 fence 或半截行会破坏前端渲染与 LLM 理解）
- * 渲染为标准 markdown 代码块 ``` 围栏
+ * 半截行与缺失围栏会破坏渲染与理解，所以默认不切；但 txt 的缩进段落会被解析成代码块、
+ * 真代码文件本身也可能远超预算，单块顶穿嵌入模型输入上限会被静默截断、尾部等于没入库
  */
 @Component
 public class CodeChunker implements BlockChunker<CodeBlock> {
 
     @Override
-    public List<VectorChunk> chunk(CodeBlock block, ChunkContext ctx) {
+    public Class<CodeBlock> blockType() {
+        return CodeBlock.class;
+    }
+
+    @Override
+    public List<ChunkDraft> chunk(CodeBlock block, ChunkContext ctx) {
         if (block == null) {
             return List.of();
         }
         String language = block.language() == null ? "" : block.language();
         String code = block.code() == null ? "" : block.code();
-        String markdown = "```" + language + "\n" + code + "\n```";
 
-        VectorChunk chunk = VectorChunk.builder()
-                .chunkId(IdUtil.getSnowflakeNextIdStr())
-                .index(ctx.startIndex())
-                .content(markdown)
-                .blockType("CODE")
-                .outlinePath(new ArrayList<>(ctx.outlinePath()))
-                .sourceBlockIds(List.of(block.id()))
+        ChunkMetadata metadata = ChunkMetadata.builder()
+                .outlinePath(ctx.outlinePath())
+                .provenance(block.provenance())
                 .build();
 
-        return List.of(chunk);
+        List<String> segments = code.length() <= ctx.budget().toleranceChars()
+                ? List.of(code)
+                : splitByLines(code, ctx.budget().maxChars());
+
+        List<ChunkDraft> result = new ArrayList<>(segments.size());
+        for (String segment : segments) {
+            String markdown = "```" + language + "\n" + segment + "\n```";
+            result.add(ChunkDraft.of(markdown, segment, metadata));
+        }
+        return ChunkDraft.pieces(result);
+    }
+
+    /**
+     * 按行累加切分：单行超预算时整行独立成块，绝不从行中间切断
+     */
+    private static List<String> splitByLines(String code, int maxChars) {
+        List<String> segments = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (String line : code.split("\n", -1)) {
+            int addition = current.isEmpty() ? line.length() : current.length() + 1 + line.length();
+            if (!current.isEmpty() && addition > maxChars) {
+                segments.add(current.toString());
+                current.setLength(0);
+            }
+            if (!current.isEmpty()) {
+                current.append('\n');
+            }
+            current.append(line);
+        }
+        if (!current.isEmpty()) {
+            segments.add(current.toString());
+        }
+        return segments.isEmpty() ? List.of(code) : segments;
     }
 }

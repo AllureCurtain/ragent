@@ -17,34 +17,31 @@
 
 package com.nageoffer.ai.ragent.core.chunk.blockaware;
 
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.ChunkDraft;
 import com.nageoffer.ai.ragent.core.parser.model.Block;
 
 import java.util.List;
 
 /**
- * Block 类型专属的切分器
+ * Block 类型专属的切分器：每个实现自报处理哪个 Block 类型、怎么切
  * <p>
- * 每个 Block 子类型有独立的 chunker：
- * <ul>
- *   <li>HeadingHandler：累积 outlinePath，不产 chunk</li>
- *   <li>ParagraphChunker：按 token 切，不跨 heading</li>
- *   <li>TableChunker：按 rowsPerChunk + 表头重复</li>
- *   <li>ImageChunker：atomic，渲染 ![caption](http://...)</li>
- *   <li>CodeChunker：atomic（代码切碎危害大）</li>
- *   <li>ListChunker:短列表 atomic,长列表按项分组</li>
- * </ul>
+ * 前者让调度器靠查表工作，新增 Block 类型只补一个实现即可；能否与邻居并块不由 Block 类型决定，
+ * 由 {@link ChunkPacker} 按预算算出来
  *
  * @param <B> 该 chunker 处理的 Block 子类型
  */
 public interface BlockChunker<B extends Block> {
 
     /**
-     * 把单个 Block 切分为若干 VectorChunk
-     *
-     * @param block 待切分的 Block
-     * @param ctx   切分上下文（outlinePath + 配置 + 起始 index）
-     * @return 切分结果（可能为空列表，如 HeadingHandler）
+     * 注册键：本 chunker 处理的 Block 类型
      */
-    List<VectorChunk> chunk(B block, ChunkContext ctx);
+    Class<B> blockType();
+
+    /**
+     * 把单个 Block 切分为若干草稿，可能为空；序号与块 ID 由装配阶段统一分配
+     * <p>
+     * 切与不切的判据全类型统一：整块撑得住 {@link com.nageoffer.ai.ragent.core.chunk.model.ChunkBudget#toleranceChars()}
+     * 就不切，超出才按块大小降级切分，且切点一律落在结构边界（行、表格行、列表项、句末）上
+     */
+    List<ChunkDraft> chunk(B block, ChunkContext ctx);
 }

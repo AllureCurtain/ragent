@@ -22,28 +22,24 @@ import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
 import com.nageoffer.ai.ragent.rag.config.KeywordProperties;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 基于 Elasticsearch 的关键词索引服务
+ * 基于 Elasticsearch 的关键词索引服务，{@code rag.keyword.type=es} 时才装配
  * <p>
- * 只写入关键词文本与检索所需元信息，不写向量；文档主键 _id 使用 chunkId，
- * 与向量库主键对齐，保证跨模态去重与融合一致
- * <p>
- * 共享索引模型：所有知识库写入同一物理索引，以 collection_name 字段区分，与向量库共享 collection 同构
- * <p>
- * 仅当开启 ES 关键词检索（rag.keyword.type=es）时装配
+ * 只写关键词文本与检索所需元信息，不写向量；文档主键 {@code _id} 取 chunkId，与向量库主键对齐才能保证
+ * 跨模态去重与融合一致；所有知识库写同一物理索引、以 {@code collection_name} 区分，与向量库共享
+ * collection 同构
  */
 @Slf4j
 @Service
@@ -65,7 +61,7 @@ public class EsKeywordIndexService implements KeywordIndexService {
     }
 
     @Override
-    public void indexDocumentChunks(String collectionName, String docId, List<VectorChunk> chunks) {
+    public void indexDocumentChunks(String collectionName, String docId, List<EmbeddedChunk> chunks) {
         if (CollUtil.isEmpty(chunks)) {
             return;
         }
@@ -73,8 +69,8 @@ public class EsKeywordIndexService implements KeywordIndexService {
 
         String index = sharedIndex();
         BulkRequest.Builder bulk = new BulkRequest.Builder();
-        for (VectorChunk chunk : chunks) {
-            String chunkId = chunk.getChunkId();
+        for (EmbeddedChunk chunk : chunks) {
+            String chunkId = chunk.chunkId();
             Map<String, Object> doc = buildDocument(collectionName, docId, chunk);
             bulk.operations(op -> op.index(idx -> idx.index(index).id(chunkId).document(doc)));
         }
@@ -92,7 +88,7 @@ public class EsKeywordIndexService implements KeywordIndexService {
     }
 
     @Override
-    public void updateChunk(String collectionName, String docId, VectorChunk chunk) {
+    public void updateChunk(String collectionName, String docId, EmbeddedChunk chunk) {
         indexDocumentChunks(collectionName, docId, List.of(chunk));
     }
 
@@ -206,10 +202,8 @@ public class EsKeywordIndexService implements KeywordIndexService {
                     .index(index)
                     .mappings(m -> m
                             .properties("content", p -> p.text(t -> t.analyzer(analyzer).searchAnalyzer(searchAnalyzer)))
-                            .properties("outline", p -> p.text(t -> t.analyzer(analyzer).searchAnalyzer(searchAnalyzer)))
                             .properties("collection_name", p -> p.keyword(k -> k))
                             .properties("doc_id", p -> p.keyword(k -> k))
-                            .properties("block_type", p -> p.keyword(k -> k))
                             .properties("chunk_index", p -> p.integer(i -> i))));
             log.info("ES 关键词共享索引已创建, index={}, analyzer={}/{}", index, analyzer, searchAnalyzer);
         } catch (Exception e) {
@@ -222,8 +216,8 @@ public class EsKeywordIndexService implements KeywordIndexService {
         }
     }
 
-    private Map<String, Object> buildDocument(String collectionName, String docId, VectorChunk chunk) {
-        String content = chunk.getContent() == null ? "" : chunk.getContent();
+    private Map<String, Object> buildDocument(String collectionName, String docId, EmbeddedChunk chunk) {
+        String content = chunk.content() == null ? "" : chunk.content();
         if (content.length() > MAX_CONTENT_LENGTH) {
             content = content.substring(0, MAX_CONTENT_LENGTH);
         }
@@ -232,15 +226,7 @@ public class EsKeywordIndexService implements KeywordIndexService {
         doc.put("content", content);
         doc.put("collection_name", collectionName);
         doc.put("doc_id", docId);
-        if (chunk.getIndex() != null) {
-            doc.put("chunk_index", chunk.getIndex());
-        }
-        if (StringUtils.hasText(chunk.getBlockType())) {
-            doc.put("block_type", chunk.getBlockType());
-        }
-        if (CollUtil.isNotEmpty(chunk.getOutlinePath())) {
-            doc.put("outline", String.join(" / ", chunk.getOutlinePath()));
-        }
+        doc.put("chunk_index", chunk.index());
         return doc;
     }
 

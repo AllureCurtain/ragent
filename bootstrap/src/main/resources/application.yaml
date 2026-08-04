@@ -96,6 +96,9 @@ rag:
   rerank:
     enabled: true
 
+  citation:
+    enabled: true  # 回答行内引用角标 [N](#cite-N)：开启会动态追加引用规则并为资料注入编号，增加首字延迟；关闭不影响文档级来源面板
+
   rate-limit:
     global:
       enabled: true
@@ -242,7 +245,7 @@ ai:
         candidates: [ qwen-flash, qwen-plus, qwen3-local ]
         timeout-ms: 5000
       standard:
-        candidates: [ qwen-plus, qwen3-local, gpt-5.4 ]
+        candidates: [ qwen3-max, qwen-plus, qwen3-local, gpt-5.4 ]
         timeout-ms: 30000
       deep:
         candidates: [ qwen3-max, glm-4.7 ]

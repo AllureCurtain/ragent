@@ -47,7 +47,7 @@ import com.nageoffer.ai.ragent.ingestion.domain.pipeline.NodeConfig;
 import com.nageoffer.ai.ragent.ingestion.domain.pipeline.PipelineDefinition;
 import com.nageoffer.ai.ragent.ingestion.domain.result.IngestionResult;
 import com.nageoffer.ai.ragent.ingestion.engine.IngestionEngine;
-import com.nageoffer.ai.ragent.ingestion.util.MimeTypeDetector;
+import com.nageoffer.ai.ragent.core.parser.mime.MimeTypeDetector;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorSpaceId;
 import com.nageoffer.ai.ragent.ingestion.service.IngestionPipelineService;
 import com.nageoffer.ai.ragent.ingestion.service.IngestionTaskService;

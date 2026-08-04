@@ -22,12 +22,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeDocumentPageRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeDocumentUploadRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeDocumentUpdateRequest;
+import com.nageoffer.ai.ragent.knowledge.controller.vo.IngestionSpecSchemaVO;
 import com.nageoffer.ai.ragent.knowledge.controller.vo.KnowledgeDocumentVO;
 import com.nageoffer.ai.ragent.knowledge.controller.vo.KnowledgeDocumentChunkLogVO;
 import com.nageoffer.ai.ragent.knowledge.controller.vo.KnowledgeDocumentSearchVO;
 import com.nageoffer.ai.ragent.framework.convention.Result;
 import com.nageoffer.ai.ragent.framework.web.Results;
 import com.nageoffer.ai.ragent.knowledge.service.KnowledgeDocumentService;
+import com.nageoffer.ai.ragent.knowledge.support.IngestionSpecSchemaProvider;
 import com.nageoffer.ai.ragent.rag.service.FileStorageService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -64,6 +66,7 @@ public class KnowledgeDocumentController {
 
     private final KnowledgeDocumentService documentService;
     private final FileStorageService fileStorageService;
+    private final IngestionSpecSchemaProvider ingestionSpecSchemaProvider;
 
     private static final Map<String, String> CONTENT_TYPE_MAP = Map.ofEntries(
             Map.entry("pdf", "application/pdf"),
@@ -78,6 +81,14 @@ public class KnowledgeDocumentController {
             Map.entry("jpeg", "image/jpeg"),
             Map.entry("svg", "image/svg+xml")
     );
+
+    /**
+     * 查询摄取配置的表单 schema：描述的正是上传与更新接口里的 {@code ingestionSpec} 字段
+     */
+    @GetMapping("/knowledge-base/docs/ingestion-spec-schema")
+    public Result<IngestionSpecSchemaVO> getIngestionSpecSchema() {
+        return Results.success(ingestionSpecSchemaProvider.describe());
+    }
 
     /**
      * 上传文档：入库记录 + 文件落盘，返回文档ID

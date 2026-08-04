@@ -18,7 +18,7 @@
 package com.nageoffer.ai.ragent.rag.core.vector;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -39,7 +39,7 @@ public class PgVectorStoreService implements VectorStoreService {
     private final ObjectMapper objectMapper;
 
     @Override
-    public void indexDocumentChunks(String collectionName, String docId, List<VectorChunk> chunks) {
+    public void indexDocumentChunks(String collectionName, String docId, List<EmbeddedChunk> chunks) {
         if (chunks == null || chunks.isEmpty()) {
             return;
         }
@@ -48,11 +48,11 @@ public class PgVectorStoreService implements VectorStoreService {
         jdbcTemplate.batchUpdate(
                 "INSERT INTO t_knowledge_vector (id, collection_name, content, metadata, embedding) VALUES (?, ?, ?, ?::jsonb, ?::vector)",
                 chunks, chunks.size(), (ps, chunk) -> {
-                    ps.setString(1, chunk.getChunkId());
+                    ps.setString(1, chunk.chunkId());
                     ps.setString(2, collectionName);
-                    ps.setString(3, chunk.getContent());
+                    ps.setString(3, chunk.content());
                     ps.setString(4, buildMetadataJson(docId, chunk));
-                    ps.setString(5, toVectorLiteral(chunk.getEmbedding()));
+                    ps.setString(5, toVectorLiteral(chunk.embedding()));
                 });
 
         log.info("批量写入向量到 PostgreSQL，collectionName={}, docId={}, count={}", collectionName, docId, chunks.size());
@@ -85,27 +85,24 @@ public class PgVectorStoreService implements VectorStoreService {
     }
 
     @Override
-    public void updateChunk(String collectionName, String docId, VectorChunk chunk) {
+    public void updateChunk(String collectionName, String docId, EmbeddedChunk chunk) {
         // noinspection SqlDialectInspection,SqlNoDataSourceInspection
         jdbcTemplate.update(
                 "INSERT INTO t_knowledge_vector (id, collection_name, content, metadata, embedding) VALUES (?, ?, ?, ?::jsonb, ?::vector) " +
                         "ON CONFLICT (id) DO UPDATE SET collection_name = EXCLUDED.collection_name, content = EXCLUDED.content, metadata = EXCLUDED.metadata, embedding = EXCLUDED.embedding",
-                chunk.getChunkId(),
+                chunk.chunkId(),
                 collectionName,
-                chunk.getContent(),
+                chunk.content(),
                 buildMetadataJson(docId, chunk),
-                toVectorLiteral(chunk.getEmbedding())
+                toVectorLiteral(chunk.embedding())
         );
     }
 
-    private String buildMetadataJson(String docId, VectorChunk chunk) {
-        Map<String, Object> meta = new LinkedHashMap<>();
-        if (chunk.getMetadata() != null) {
-            meta.putAll(chunk.getMetadata());
-        }
-
+    private String buildMetadataJson(String docId, EmbeddedChunk chunk) {
+        // 结构化元数据统一走唯一序列化点：新增字段自动出现在所有索引后端，不必逐个后端补写
+        Map<String, Object> meta = new LinkedHashMap<>(chunk.metadata().toMap());
         meta.put("doc_id", docId);
-        meta.put("chunk_index", chunk.getIndex());
+        meta.put("chunk_index", chunk.index());
         try {
             return objectMapper.writeValueAsString(meta);
         } catch (Exception e) {

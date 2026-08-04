@@ -17,16 +17,19 @@
 
 package com.nageoffer.ai.ragent.core.parser.mineru;
 
+import com.nageoffer.ai.ragent.core.parser.image.ImageParseProperties;
 import com.nageoffer.ai.ragent.core.parser.model.AssetRef;
 import com.nageoffer.ai.ragent.core.parser.model.Block;
 import com.nageoffer.ai.ragent.core.parser.model.CodeBlock;
 import com.nageoffer.ai.ragent.core.parser.model.HeadingBlock;
+import com.nageoffer.ai.ragent.core.parser.model.HtmlTableBlock;
 import com.nageoffer.ai.ragent.core.parser.model.ImageBlock;
 import com.nageoffer.ai.ragent.core.parser.model.ListBlock;
 import com.nageoffer.ai.ragent.core.parser.model.ParagraphBlock;
 import com.nageoffer.ai.ragent.core.parser.model.ParsedDocument;
 import com.nageoffer.ai.ragent.core.parser.model.Provenance;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
+import com.nageoffer.ai.ragent.infra.vlm.VlmService;
 import com.nageoffer.ai.ragent.rag.dto.StoredFileDTO;
 import com.nageoffer.ai.ragent.rag.service.FileStorageService;
 import lombok.extern.slf4j.Slf4j;
@@ -73,20 +76,11 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * MinerU 结果解包器:zip 字节流 → ParsedDocument
+ * MinerU 结果解包器：zip 字节流 → ParsedDocument
  * <p>
- * 流程:
- * <ol>
- *   <li>解 zip 收集所有 entry(markdown + 图片)</li>
- *   <li>对每个图片字节:上传到 RustFS asset-bucket 拿到 URL</li>
- *   <li>记录 {zip 内路径 → RustFS URL} 映射</li>
- *   <li>commonmark 解析 markdown AST,遍历:
- *     <ul>
- *       <li>"段首图片" → 提升为 {@link ImageBlock},asset 关联 RustFS URL</li>
- *       <li>其他 block → 转 ragent Block</li>
- *     </ul>
- *   </li>
- * </ol>
+ * zip 内是一份 markdown 加若干图片，图片先逐个上传资产桶换取公开 URL，再按 {zip 内路径 → URL} 映射
+ * 改写 markdown AST 里的图片地址，其中段首图片提升为 {@link ImageBlock}；字节在手，顺带调 VLM
+ * 生成描述，不然内嵌图的向量文本只剩一条 URL
  */
 @Slf4j
 @Component
@@ -97,18 +91,22 @@ public class MinerUResultUnpacker {
             .build();
 
     private final FileStorageService fileStorageService;
+    private final VlmService vlmService;
+    private final ImageParseProperties imageParseProperties;
 
-    public MinerUResultUnpacker(FileStorageService fileStorageService) {
+    public MinerUResultUnpacker(FileStorageService fileStorageService,
+                                VlmService vlmService,
+                                ImageParseProperties imageParseProperties) {
         this.fileStorageService = fileStorageService;
+        this.vlmService = vlmService;
+        this.imageParseProperties = imageParseProperties;
     }
 
     /**
-     * 解包 MinerU zip 输出为 ParsedDocument
+     * 解包 zip 为 ParsedDocument，其中 ImageBlock 已带上公开 URL 的 AssetRef
      *
-     * @param zipBytes   MinerU 返回的 zip 字节流
-     * @param sourceFile 文档来源标识,写入 Provenance.sourceFile
-     * @param documentId 文档 ID,用于资产 key 命名 {@code assets/{documentId}/{uuid}.{ext}}
-     * @return 含 Block 列表的 ParsedDocument,ImageBlock 已携带 RustFS AssetRef
+     * @param sourceFile 写入 Provenance.sourceFile 的来源标识
+     * @param documentId 资产 key 命名用，落成 {@code assets/{documentId}/{uuid}.{ext}}
      */
     public ParsedDocument unpack(byte[] zipBytes, String sourceFile, String documentId) {
         if (zipBytes == null || zipBytes.length == 0) {
@@ -120,18 +118,20 @@ public class MinerUResultUnpacker {
             throw new ServiceException("MinerU zip 中未找到 markdown 文件");
         }
 
-        // 上传所有图片到 RustFS,得 {zipPath → rustfsUrl} 映射
+        // 上传所有图片，得 {zip 内路径 → 公开 URL} 映射
         Map<String, String> imageUrlMap = uploadImages(contents.images, documentId);
+        Map<String, String> imageDescriptionMap = describeImages(contents.images);
 
         // 解析 markdown 输出 Block 列表
         Provenance prov = Provenance.ofFile(sourceFile);
         Document doc = (Document) MARKDOWN_PARSER.parse(contents.markdown);
-        UnpackVisitor visitor = new UnpackVisitor(prov, imageUrlMap);
+        UnpackVisitor visitor = new UnpackVisitor(prov, imageUrlMap, imageDescriptionMap);
         doc.accept(visitor);
 
         return ParsedDocument.of(visitor.getBlocks(), Map.of(
                 "parser", "MinerU",
                 "imagesUploaded", imageUrlMap.size(),
+                "imagesDescribed", imageDescriptionMap.size(),
                 "blocks", visitor.getBlocks().size()
         ));
     }
@@ -184,7 +184,7 @@ public class MinerUResultUnpacker {
     }
 
     /**
-     * 上传所有图片到 RustFS，返回 {zipPath → 公开访问 URL}
+     * 上传所有图片到资产桶，返回 {zip 内路径 → 公开访问 URL}
      */
     private Map<String, String> uploadImages(Map<String, byte[]> images, String documentId) {
         Map<String, String> result = new HashMap<>();
@@ -196,12 +196,38 @@ public class MinerUResultUnpacker {
             String mime = inferMime(ext);
             try {
                 StoredFileDTO stored = fileStorageService.uploadAsset(data, filename, mime);
-                // 转为浏览器可直连的公开 URL(资产桶已开公共读)，供 markdown 图片链接固化入库
+                // 转成浏览器可直连的公开 URL（资产桶已开公共读），固化进 markdown 图片链接入库
                 String publicUrl = fileStorageService.getPublicUrl(stored.getUrl());
                 result.put(zipPath, publicUrl);
             } catch (Exception ex) {
                 log.error("MinerU 图片上传失败 zipPath={}", zipPath, ex);
                 throw new ServiceException("MinerU 图片上传失败 " + zipPath + ": " + ex.getMessage());
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 逐张图生文，键与 {@code imageUrlMap} 同为 zip 内路径
+     * <p>
+     * 单张失败只记日志不中断，一张插图召不回来远好过整篇文档入库失败；串行调用，多图文档解析会明显变慢，
+     * 但 MinerU 云端解析本就以分钟计
+     */
+    private Map<String, String> describeImages(Map<String, byte[]> images) {
+        if (!imageParseProperties.isEmbeddedDescribeEnabled() || images.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, String> result = new HashMap<>();
+        for (Map.Entry<String, byte[]> e : images.entrySet()) {
+            String zipPath = e.getKey();
+            try {
+                String description = vlmService.describeImage(e.getValue(), inferMime(extractExt(zipPath)),
+                        imageParseProperties.getDescriptionPrompt(), imageParseProperties.getMaxOutputTokens());
+                if (description != null && !description.isBlank()) {
+                    result.put(zipPath, description.strip());
+                }
+            } catch (Exception ex) {
+                log.warn("MinerU 内嵌图图生文失败，该图向量文本将只剩链接 zipPath={}", zipPath, ex);
             }
         }
         return result;
@@ -228,21 +254,21 @@ public class MinerUResultUnpacker {
     /**
      * 遍历 markdown AST 输出 Block
      * <p>
-     * 与 MarkdownDocumentParser 的 Visitor 类似,但额外:
-     * <ul>
-     *   <li>剥离"段首 Image",提升为 {@link ImageBlock} + RustFS AssetRef(剩余内容另起 ParagraphBlock)</li>
-     *   <li>行内 Image 保留在 ParagraphBlock 中，链接已替换为 RustFS URL</li>
-     * </ul>
+     * 段首 Image 剥离出来提升为 {@link ImageBlock}、剩余内容另起 ParagraphBlock，行内 Image 留在 ParagraphBlock
+     * 文本里，两者的链接都已替换成资产桶 URL
      */
     private static final class UnpackVisitor extends AbstractVisitor {
 
         private final Provenance provenance;
         private final Map<String, String> imageUrlMap;
+        private final Map<String, String> imageDescriptionMap;
         private final List<Block> blocks = new ArrayList<>();
 
-        UnpackVisitor(Provenance provenance, Map<String, String> imageUrlMap) {
+        UnpackVisitor(Provenance provenance, Map<String, String> imageUrlMap,
+                      Map<String, String> imageDescriptionMap) {
             this.provenance = provenance;
             this.imageUrlMap = imageUrlMap;
+            this.imageDescriptionMap = imageDescriptionMap;
         }
 
         List<Block> getBlocks() {
@@ -252,9 +278,7 @@ public class MinerUResultUnpacker {
         @Override
         public void visit(Heading heading) {
             blocks.add(new HeadingBlock(
-                    UUID.randomUUID().toString(),
                     provenance,
-                    List.of(),
                     heading.getLevel(),
                     extractInlineText(heading)
             ));
@@ -278,21 +302,14 @@ public class MinerUResultUnpacker {
 
             String text = extractInlineTextFrom(rest);
             if (!text.isEmpty()) {
-                blocks.add(new ParagraphBlock(
-                        UUID.randomUUID().toString(),
-                        provenance,
-                        List.of(),
-                        text
-                ));
+                blocks.add(new ParagraphBlock(provenance, text));
             }
         }
 
         @Override
         public void visit(FencedCodeBlock codeBlock) {
             blocks.add(new CodeBlock(
-                    UUID.randomUUID().toString(),
                     provenance,
-                    List.of(),
                     codeBlock.getInfo(),
                     stripTrailingNewline(codeBlock.getLiteral())
             ));
@@ -301,9 +318,7 @@ public class MinerUResultUnpacker {
         @Override
         public void visit(IndentedCodeBlock codeBlock) {
             blocks.add(new CodeBlock(
-                    UUID.randomUUID().toString(),
                     provenance,
-                    List.of(),
                     null,
                     stripTrailingNewline(codeBlock.getLiteral())
             ));
@@ -329,9 +344,9 @@ public class MinerUResultUnpacker {
         }
 
         /**
-         * 处理 HTML 块:MinerU 的表格等以原始 HTML(如 {@code <table>})嵌在 markdown 里，
-         * commonmark 解析为 HtmlBlock,这里原样保留 HTML 文本写入，避免内容被丢弃
-         * (底层已兼容 HTML，无需转 Markdown 语法)
+         * MinerU 的表格以原始 HTML 嵌在 markdown 里，被 commonmark 归为 HtmlBlock
+         * <p>
+         * 表格单拎出来：落成段落会被按字符硬切、断面停在标签中间，其余 HTML 仍走段落保底不丢内容
          */
         @Override
         public void visit(HtmlBlock htmlBlock) {
@@ -339,17 +354,11 @@ public class MinerUResultUnpacker {
             if (html.isEmpty()) {
                 return;
             }
-            blocks.add(new ParagraphBlock(
-                    UUID.randomUUID().toString(),
-                    provenance,
-                    List.of(),
-                    html
-            ));
+            blocks.add(html.regionMatches(true, 0, "<table", 0, 6)
+                    ? new HtmlTableBlock(provenance, html)
+                    : new ParagraphBlock(provenance, html));
         }
 
-        /**
-         * 判断节点是否为可跳过的空白(换行或纯空白文本)
-         */
         private static boolean isBlank(Node node) {
             return node instanceof SoftLineBreak
                     || node instanceof HardLineBreak
@@ -358,45 +367,51 @@ public class MinerUResultUnpacker {
 
         private void handleStandaloneImage(Image image) {
             String rawDest = image.getDestination();
+            String zipPath = resolveZipPath(rawDest);
             String resolved = resolveImageUrl(rawDest);
             String caption = extractInlineText(image);
-            String blockId = UUID.randomUUID().toString();
 
-            AssetRef asset = new AssetRef(
-                    resolved,
-                    inferMimeFromUrl(resolved),
-                    blockId
-            );
+            AssetRef asset = new AssetRef(resolved, inferMimeFromUrl(resolved));
             blocks.add(new ImageBlock(
-                    blockId, provenance, List.of(),
-                    asset, caption, caption
+                    provenance,
+                    asset, caption, caption,
+                    zipPath == null ? null : imageDescriptionMap.get(zipPath)
             ));
         }
 
         private String resolveImageUrl(String rawDest) {
+            String zipPath = resolveZipPath(rawDest);
+            if (zipPath != null) {
+                return imageUrlMap.get(zipPath);
+            }
+            return rawDest == null ? "" : rawDest;
+        }
+
+        /**
+         * 把 markdown 里的图片地址还原成 zip 内路径，URL 与描述两张表共用这个键
+         */
+        private String resolveZipPath(String rawDest) {
             if (rawDest == null) {
-                return "";
+                return null;
             }
             // 优先精确匹配
-            String url = imageUrlMap.get(rawDest);
-            if (url != null) {
-                return url;
+            if (imageUrlMap.containsKey(rawDest)) {
+                return rawDest;
             }
-            // 尝试模糊匹配(MinerU markdown 里可能用 ./images/xxx 或 images/xxx)
+            // 模糊匹配：MinerU markdown 里可能写 ./images/xxx，也可能写 images/xxx
             String norm = rawDest.replaceFirst("^\\./", "");
-            url = imageUrlMap.get(norm);
-            if (url != null) {
-                return url;
+            if (imageUrlMap.containsKey(norm)) {
+                return norm;
             }
             // 用文件名匹配兜底
             int idx = norm.lastIndexOf('/');
             String fileName = idx >= 0 ? norm.substring(idx + 1) : norm;
-            for (Map.Entry<String, String> e : imageUrlMap.entrySet()) {
-                if (e.getKey().endsWith("/" + fileName) || e.getKey().equals(fileName)) {
-                    return e.getValue();
+            for (String key : imageUrlMap.keySet()) {
+                if (key.endsWith("/" + fileName) || key.equals(fileName)) {
+                    return key;
                 }
             }
-            return rawDest;
+            return null;
         }
 
         private static String inferMimeFromUrl(String url) {
@@ -417,13 +432,7 @@ public class MinerUResultUnpacker {
                 }
                 child = child.getNext();
             }
-            return new ListBlock(
-                    UUID.randomUUID().toString(),
-                    provenance,
-                    List.of(),
-                    ordered,
-                    items
-            );
+            return new ListBlock(provenance, ordered, items);
         }
 
         private void handleTable(TableBlock tableBlock) {
@@ -450,12 +459,9 @@ public class MinerUResultUnpacker {
             }
 
             blocks.add(new com.nageoffer.ai.ragent.core.parser.model.TableBlock(
-                    UUID.randomUUID().toString(),
                     provenance,
-                    List.of(),
                     headers,
-                    rows,
-                    null
+                    rows
             ));
         }
 
@@ -497,7 +503,7 @@ public class MinerUResultUnpacker {
                 String inner = extractInlineText(link);
                 sb.append('[').append(inner).append("](").append(link.getDestination()).append(')');
             } else if (node instanceof Image img) {
-                // inline 图片(非 standalone)保留 [alt](rustfsUrl) 形式
+                // 行内图片保留 ![alt](url) 形式，随段落文本一起入库
                 String alt = extractInlineText(img);
                 String resolved = resolveImageUrl(img.getDestination());
                 sb.append("![").append(alt).append("](").append(resolved).append(')');

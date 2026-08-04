@@ -17,22 +17,17 @@
 
 package com.nageoffer.ai.ragent.rag.core.keyword;
 
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
 
 import java.util.List;
 
 /**
- * 关键词索引服务 SPI
+ * 关键词索引服务 SPI：与向量写入的 {@link com.nageoffer.ai.ragent.rag.core.vector.VectorStoreService}
+ * 对称，把 chunk 的关键词文本写入全文检索引擎
  * <p>
- * 与向量写入的 {@link com.nageoffer.ai.ragent.rag.core.vector.VectorStoreService} 对称，
- * 负责把 chunk 的关键词文本写入全文检索引擎（本期为 Elasticsearch）
- * <p>
- * 共享索引模型：所有知识库写入同一物理索引，以 collection_name 字段区分，与向量库共享 collection 同构
- * <p>
- * 关键约束：写入时文档主键（ES _id）必须等于向量库主键 chunkId，
- * 否则跨模态去重与融合无法对齐
- * <p>
- * 通过 rag.keyword.type 选择实现，none 时无实现被注册，写侧装饰器也随之不注册
+ * 写入时文档主键（ES {@code _id}）必须等于向量库主键 chunkId，否则跨模态去重与融合无法对齐；所有知识库
+ * 写同一物理索引、以 {@code collection_name} 区分，与向量库共享 collection 同构；实现由
+ * {@code rag.keyword.type} 选择，none 时无实现注册，写侧装饰器也随之不注册
  */
 public interface KeywordIndexService {
 
@@ -43,7 +38,7 @@ public interface KeywordIndexService {
      * @param docId          文档唯一标识
      * @param chunks         文档切片列表
      */
-    void indexDocumentChunks(String collectionName, String docId, List<VectorChunk> chunks);
+    void indexDocumentChunks(String collectionName, String docId, List<EmbeddedChunk> chunks);
 
     /**
      * 更新单个 chunk 的关键词索引
@@ -52,7 +47,7 @@ public interface KeywordIndexService {
      * @param docId          文档唯一标识
      * @param chunk          待更新的文档切片
      */
-    void updateChunk(String collectionName, String docId, VectorChunk chunk);
+    void updateChunk(String collectionName, String docId, EmbeddedChunk chunk);
 
     /**
      * 删除文档的所有关键词索引

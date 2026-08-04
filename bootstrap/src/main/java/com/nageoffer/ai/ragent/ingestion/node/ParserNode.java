@@ -21,9 +21,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nageoffer.ai.ragent.core.parser.BlockTextRenderer;
 import com.nageoffer.ai.ragent.core.parser.DocumentParser;
-import com.nageoffer.ai.ragent.core.parser.DocumentParserSelector;
 import com.nageoffer.ai.ragent.core.parser.model.Block;
 import com.nageoffer.ai.ragent.core.parser.model.ParsedDocument;
+import com.nageoffer.ai.ragent.core.parser.registry.ParseProfile;
+import com.nageoffer.ai.ragent.core.parser.registry.ParserRegistry;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.ingestion.domain.context.IngestionContext;
 import com.nageoffer.ai.ragent.ingestion.domain.context.StructuredDocument;
@@ -31,7 +32,7 @@ import com.nageoffer.ai.ragent.ingestion.domain.enums.IngestionNodeType;
 import com.nageoffer.ai.ragent.ingestion.domain.pipeline.NodeConfig;
 import com.nageoffer.ai.ragent.ingestion.domain.result.NodeResult;
 import com.nageoffer.ai.ragent.ingestion.domain.settings.ParserSettings;
-import com.nageoffer.ai.ragent.ingestion.util.MimeTypeDetector;
+import com.nageoffer.ai.ragent.core.parser.mime.MimeTypeDetector;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -48,11 +49,11 @@ import java.util.Map;
 public class ParserNode implements IngestionNode {
 
     private final ObjectMapper objectMapper;
-    private final DocumentParserSelector parserSelector;
+    private final ParserRegistry parserRegistry;
 
-    public ParserNode(ObjectMapper objectMapper, DocumentParserSelector parserSelector) {
+    public ParserNode(ObjectMapper objectMapper, ParserRegistry parserRegistry) {
         this.objectMapper = objectMapper;
-        this.parserSelector = parserSelector;
+        this.parserRegistry = parserRegistry;
     }
 
     @Override
@@ -81,8 +82,9 @@ public class ParserNode implements IngestionNode {
 
         ParserSettings.ParserRule rule = matchRule(settings, mimeType, fileName);
 
-        // v1.1：按 MIME 路由（删除硬编码 Tika）；不匹配显式抛错，不静默兜底
-        DocumentParser parser = parserSelector.selectByMimeType(mimeType);
+        // 按 (MIME × 档位) 查注册表；不匹配显式抛错，不静默兜底
+        // 管道暂无档位入口，走默认档；档位随 IngestionSpec 下发是内核化之后的事
+        DocumentParser parser = parserRegistry.find(mimeType, ParseProfile.defaultProfile()).orElse(null);
         if (parser == null) {
             return NodeResult.fail(new ClientException(
                     "未找到 MIME [" + mimeType + "] 对应的解析器,fileName=" + fileName));

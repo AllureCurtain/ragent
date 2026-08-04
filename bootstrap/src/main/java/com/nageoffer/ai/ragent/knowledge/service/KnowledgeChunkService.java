@@ -18,6 +18,8 @@
 package com.nageoffer.ai.ragent.knowledge.service;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
+import com.nageoffer.ai.ragent.core.ingest.VectorTarget;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeChunkBatchRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeChunkCreateRequest;
 import com.nageoffer.ai.ragent.knowledge.controller.request.KnowledgeChunkPageRequest;
@@ -49,22 +51,7 @@ public interface KnowledgeChunkService {
      */
     KnowledgeChunkVO create(String docId, KnowledgeChunkCreateRequest requestParam);
 
-    /**
-     * 批量新增文档分片（默认不写入向量库）
-     *
-     * @param docId         文档 ID
-     * @param requestParams 批量新增分片请求参数列表
-     */
-    void batchCreate(String docId, List<KnowledgeChunkCreateRequest> requestParams);
 
-    /**
-     * 批量新增文档分片（可选同步写入向量库）
-     *
-     * @param docId         文档 ID
-     * @param requestParams 批量新增分片请求参数列表
-     * @param writeVector   是否同步写入向量库
-     */
-    void batchCreate(String docId, List<KnowledgeChunkCreateRequest> requestParams, boolean writeVector);
 
     /**
      * 更新指定文档的特定分片内容
@@ -111,12 +98,15 @@ public interface KnowledgeChunkService {
     void updateEnabledByDocId(String docId, String kbId, boolean enabled);
 
     /**
-     * 根据文档 ID 查询所有分片列表
+     * 把文档已入库的所有分片重新向量化：文档启用时重建向量用
+     * <p>
+     * 不经过控制层 VO——向量文本是索引侧的内在数据，不对外暴露
      *
-     * @param docId 文档 ID
-     * @return 分片列表
+     * @param docId  文档 ID
+     * @param target 向量落点（模型 + 维度）
+     * @return 已向量化的分片，按 chunkIndex 升序
      */
-    List<KnowledgeChunkVO> listByDocId(String docId);
+    List<EmbeddedChunk> embedPersistedChunks(String docId, VectorTarget target);
 
     /**
      * 删除指定文档的所有分片

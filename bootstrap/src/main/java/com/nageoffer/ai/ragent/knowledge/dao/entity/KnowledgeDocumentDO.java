@@ -23,6 +23,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.nageoffer.ai.ragent.knowledge.dao.handler.JsonbTypeHandler;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -94,6 +95,14 @@ public class KnowledgeDocumentDO {
     private String fileType;
 
     /**
+     * 真实 MIME 类型
+     * <p>
+     * 与展示用的 {@link #fileType} 是两个不同的事实：这个由字节探测得出、只服务解析路由；
+     * 那个由扩展名得出、只服务图标与预览。把展示短标签当 MIME 用过，那是一整类串线缺陷的根源
+     */
+    private String mimeType;
+
+    /**
      * 文件大小（单位字节）
      */
     private Long fileSize;
@@ -106,17 +115,14 @@ public class KnowledgeDocumentDO {
     private String processMode;
 
     /**
-     * 分块策略
+     * 文档级摄取配置（JSON）：解析档位 + 分块预算
      * 仅在 processMode=chunk 时有效
+     * <p>
+     * 取代原先的"分块策略列 + 自由 JSON 配置列"：策略枚举在真实链路上不产生任何差异，
+     * 而自由 JSON 的键由前端手工拼、后端分三处用硬编码字符串探测
      */
-    private String chunkStrategy;
-
-    /**
-     * 分块参数配置（JSON）
-     * 仅在 processMode=chunk 时有效
-     */
-    @TableField(typeHandler = com.nageoffer.ai.ragent.knowledge.dao.handler.JsonbTypeHandler.class)
-    private String chunkConfig;
+    @TableField(typeHandler = JsonbTypeHandler.class)
+    private String ingestionSpec;
 
     /**
      * 数据通道（Pipeline）ID

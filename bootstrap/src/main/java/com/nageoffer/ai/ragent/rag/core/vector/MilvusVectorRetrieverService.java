@@ -50,7 +50,7 @@ public class MilvusVectorRetrieverService implements VectorRetrieverService {
 
     @Override
     public List<RetrievedChunk> retrieve(RetrieveRequest retrieveParam) {
-        float[] norm = normalize(toArray(embeddingService.embed(retrieveParam.getQuery())));
+        float[] norm = embedAndNormalize(retrieveParam.getQuery());
         return retrieveByVector(norm, retrieveParam);
     }
 
@@ -59,6 +59,11 @@ public class MilvusVectorRetrieverService implements VectorRetrieverService {
         // 单个或多个逻辑库都在共享物理 Collection 中一次过滤，topK 是整个过滤范围的总预算
         String filter = buildCollectionFilter(retrieveParam.getEffectiveCollectionNames());
         return searchShared(vector, filter, retrieveParam.getTopK());
+    }
+
+    @Override
+    public float[] embedAndNormalize(String query) {
+        return normalize(toArray(embeddingService.embed(query)));
     }
 
     @Override
@@ -71,7 +76,7 @@ public class MilvusVectorRetrieverService implements VectorRetrieverService {
         if (collectionNames == null || collectionNames.isEmpty()) {
             return List.of();
         }
-        float[] norm = normalize(toArray(embeddingService.embed(query)));
+        float[] norm = embedAndNormalize(query);
         // 全局检索：单次在共享 collection 内按 collection_name in [...] 跨库召回，替代逐库 fan-out
         String filter = buildCollectionFilter(collectionNames);
         return searchShared(norm, filter, candidateBudget);

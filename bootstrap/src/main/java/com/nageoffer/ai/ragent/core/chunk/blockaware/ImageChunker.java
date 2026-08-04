@@ -17,58 +17,47 @@
 
 package com.nageoffer.ai.ragent.core.chunk.blockaware;
 
-import cn.hutool.core.util.IdUtil;
-import com.nageoffer.ai.ragent.core.chunk.VectorChunk;
+import com.nageoffer.ai.ragent.core.chunk.model.ChunkDraft;
+import com.nageoffer.ai.ragent.core.chunk.model.ChunkMetadata;
 import com.nageoffer.ai.ragent.core.parser.model.AssetRef;
 import com.nageoffer.ai.ragent.core.parser.model.ImageBlock;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 图片 chunker：每个 ImageBlock 产生一个 atomic VectorChunk
+ * 图片 chunker：一图一块，展示文本是描述 + markdown 图片链接，向量文本只取描述
  * <p>
- * 渲染为 markdown 图片链接 {@code ![caption](http://...)}，保证整段不会被切碎
- * 同时把 ImageBlock 的 AssetRef 挂载到 VectorChunk.assets，检索时可用
+ * 图片 URL 进向量是纯噪声，只在无描述时（如 MinerU 抽图）才回落到链接本身；声明为可流动，
+ * 让图与它的前导语 / 解释文字同块，检索命中即带图
  */
 @Component
 public class ImageChunker implements BlockChunker<ImageBlock> {
 
     @Override
-    public List<VectorChunk> chunk(ImageBlock block, ChunkContext ctx) {
+    public Class<ImageBlock> blockType() {
+        return ImageBlock.class;
+    }
+
+    @Override
+    public List<ChunkDraft> chunk(ImageBlock block, ChunkContext ctx) {
         if (block == null || block.asset() == null) {
             return List.of();
         }
         AssetRef asset = block.asset();
+        String markdown = "![" + pickCaption(block) + "](" + asset.publicUrl() + ")";
 
-        String visible = pickCaption(block);
-        String markdown = "![" + visible + "](" + asset.publicUrl() + ")";
-
-        // content(展示+答题):自包含描述在前 + 图片 markdown 在后;无描述(如 MinerU 抽图)回落为纯链接
         String description = block.description();
         boolean hasDescription = description != null && !description.isBlank();
-        String content = hasDescription
-                ? description.strip() + "\n\n" + markdown
-                : markdown;
+        String content = hasDescription ? description.strip() + "\n\n" + markdown : markdown;
 
-        // embeddingText(只做向量):用描述原文,去掉 ![](url) 那行 URL 噪声;
-        // 无描述则置 null,由 ChunkEmbeddingService 回退 content(MinerU 老行为不变)
-        String embeddingText = hasDescription ? description.strip() : null;
-
-        VectorChunk chunk = VectorChunk.builder()
-                .chunkId(IdUtil.getSnowflakeNextIdStr())
-                .index(ctx.startIndex())
-                .content(content)
-                .embeddingText(embeddingText)
-                .blockType("IMAGE")
-                .outlinePath(new ArrayList<>(ctx.outlinePath()))
-                .sourceBlockIds(List.of(block.id()))
+        ChunkMetadata metadata = ChunkMetadata.builder()
+                .outlinePath(ctx.outlinePath())
                 .assets(List.of(asset))
-                .sectionContext(buildSectionContext(block))
+                .provenance(block.provenance())
                 .build();
 
-        return List.of(chunk);
+        return List.of(ChunkDraft.of(content, hasDescription ? description.strip() : null, metadata));
     }
 
     private String pickCaption(ImageBlock block) {
@@ -81,10 +70,4 @@ public class ImageChunker implements BlockChunker<ImageBlock> {
         return "";
     }
 
-    private String buildSectionContext(ImageBlock block) {
-        if (block.provenance() == null || block.provenance().sheetName() == null) {
-            return null;
-        }
-        return "sheet=" + block.provenance().sheetName();
-    }
 }

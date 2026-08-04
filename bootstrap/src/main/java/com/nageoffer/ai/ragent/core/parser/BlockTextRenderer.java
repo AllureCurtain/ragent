@@ -20,6 +20,7 @@ package com.nageoffer.ai.ragent.core.parser;
 import com.nageoffer.ai.ragent.core.parser.model.Block;
 import com.nageoffer.ai.ragent.core.parser.model.CodeBlock;
 import com.nageoffer.ai.ragent.core.parser.model.HeadingBlock;
+import com.nageoffer.ai.ragent.core.parser.model.HtmlTableBlock;
 import com.nageoffer.ai.ragent.core.parser.model.ImageBlock;
 import com.nageoffer.ai.ragent.core.parser.model.ListBlock;
 import com.nageoffer.ai.ragent.core.parser.model.ParagraphBlock;
@@ -66,6 +67,8 @@ public final class BlockTextRenderer {
                     }
                 }
                 sb.append('\n');
+            } else if (b instanceof HtmlTableBlock t) {
+                sb.append(t.html() == null ? "" : t.html()).append("\n\n");
             } else if (b instanceof ImageBlock i) {
                 // 描述在前、图片 markdown 在后（与 ImageChunker 一致）：图生文描述是唯一可检索文本，
                 // 整篇/legacy 等拍平路径若只渲染 ![](url) 会把描述丢掉，导致永远召回不到

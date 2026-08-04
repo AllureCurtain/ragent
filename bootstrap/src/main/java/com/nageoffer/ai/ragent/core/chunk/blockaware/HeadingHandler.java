@@ -24,39 +24,48 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 标题处理器：不产 VectorChunk，只更新 ChunkerNode 主流程持有的 outlinePath
+ * 标题处理器：按原始 heading 级别弹栈，维护调度器持有的章节路径
  * <p>
- * 语义：H_N 标题会保留前 N-1 级 path，并把自己作为第 N 级追加
- * <ul>
- *   <li>H1 "A" → ["A"]</li>
- *   <li>... 再来 H2 "B" → ["A", "B"]</li>
- *   <li>... 再来 H2 "C" → ["A", "C"]（同级替换）</li>
- *   <li>... 再来 H1 "D" → ["D"]（顶级重置）</li>
- *   <li>... 再来 H3 "E" → ["D", "E"]（跳级时只用当前 path 补齐）</li>
- * </ul>
+ * 无状态，摄取并发共用同一实例，路径由调用方持有并逐块传入
  */
 @Component
 public class HeadingHandler {
 
     /**
-     * 根据 heading 更新章节路径。
-     *
-     * @param currentPath 当前 outlinePath（不可变）
-     * @param heading     新的 HeadingBlock
-     * @return 新的 outlinePath（不可变）
+     * 章节路径连同各级的原始 heading 级别
+     * <p>
+     * 级别必须一起留着：只看路径深度无法判断新标题该挂在哪一级下，不以 H1 开头的文档会把同级章节层层嵌套
      */
-    public List<String> update(List<String> currentPath, HeadingBlock heading) {
-        if (heading == null) {
-            return currentPath;
-        }
-        int targetLevel = Math.max(1, heading.level());
-        int keep = Math.min(currentPath.size(), targetLevel - 1);
+    public record Outline(List<String> path, List<Integer> levels) {
 
-        List<String> next = new ArrayList<>(keep + 1);
-        for (int i = 0; i < keep; i++) {
-            next.add(currentPath.get(i));
+        public static final Outline EMPTY = new Outline(List.of(), List.of());
+
+        public Outline {
+            path = path == null ? List.of() : List.copyOf(path);
+            levels = levels == null ? List.of() : List.copyOf(levels);
         }
-        next.add(heading.text() == null ? "" : heading.text());
-        return List.copyOf(next);
+    }
+
+    /**
+     * 根据 heading 更新章节路径，入参与返回值都不可变
+     */
+    public Outline update(Outline current, HeadingBlock heading) {
+        Outline base = current == null ? Outline.EMPTY : current;
+        if (heading == null) {
+            return base;
+        }
+        int level = Math.max(1, heading.level());
+
+        // 弹掉同级与更深的祖先，真正的父级是最近一个级别更小的标题
+        int keep = base.levels().size();
+        while (keep > 0 && base.levels().get(keep - 1) >= level) {
+            keep--;
+        }
+
+        List<String> path = new ArrayList<>(base.path().subList(0, keep));
+        List<Integer> levels = new ArrayList<>(base.levels().subList(0, keep));
+        path.add(heading.text() == null ? "" : heading.text());
+        levels.add(level);
+        return new Outline(path, levels);
     }
 }

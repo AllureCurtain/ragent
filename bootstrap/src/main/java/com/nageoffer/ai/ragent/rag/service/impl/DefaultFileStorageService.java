@@ -23,7 +23,7 @@ import com.nageoffer.ai.ragent.rag.config.RagStorageProperties;
 import com.nageoffer.ai.ragent.rag.core.storage.ObjectStorageClient;
 import com.nageoffer.ai.ragent.rag.dto.StoredFileDTO;
 import com.nageoffer.ai.ragent.rag.service.FileStorageService;
-import com.nageoffer.ai.ragent.rag.util.FileTypeDetector;
+import com.nageoffer.ai.ragent.rag.util.DisplayType;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.tika.Tika;
@@ -40,10 +40,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * 后端无关的文件存储实现
  * <p>
- * 负责 namespace/key 组装、桶的语义归属（私有文档 → kbBucket，公共资产 → assetBucket）、Tika 类型探测与 {@link StoredFileDTO} 装配，
- * 底层裸操作委托给注入的 {@link ObjectStorageClient}（S3 或 OSS，由 {@code rag.storage.type} 决定）
- * <p>
- * 存储引用只保留裸 key，桶是部署级配置常量、不写进数据（改桶名不会令历史引用失联）
+ * 负责 namespace/key 组装、桶的语义归属（私有文档 → kbBucket，公共资产 → assetBucket）、Tika 类型探测
+ * 与 {@link StoredFileDTO} 装配，底层裸操作委托给 {@link ObjectStorageClient}（S3 或 OSS，由
+ * {@code rag.storage.type} 决定）；存储引用只保留裸 key，桶是部署级配置常量、不写进数据，改桶名不会令
+ * 历史引用失联
  */
 @Slf4j
 @Service
@@ -223,7 +223,8 @@ public class DefaultFileStorageService implements FileStorageService {
 
     private StoredFileDTO buildStoredFileDTO(String url, String originalFilename,
                                              String contentType, long size) {
-        String detectedType = FileTypeDetector.detectType(originalFilename, contentType);
+        // 展示标签唯一产生点：扩展名优先，取值集合封闭
+        String detectedType = DisplayType.of(originalFilename, contentType).getCode();
         return StoredFileDTO.builder()
                 .url(url)
                 .detectedType(detectedType)
