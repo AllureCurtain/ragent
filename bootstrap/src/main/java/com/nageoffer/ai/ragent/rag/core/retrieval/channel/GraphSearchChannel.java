@@ -21,14 +21,14 @@ import cn.hutool.core.collection.CollUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.config.GraphProperties;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
+import com.nageoffer.ai.ragent.rag.core.graph.GraphEvidence;
 import com.nageoffer.ai.ragent.rag.core.graph.LightRagClient;
-import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
-import com.nageoffer.ai.ragent.rag.core.intent.NodeScoreFilters;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -39,8 +39,8 @@ import java.util.List;
  * <p>
  * 与其他通道并行执行，结果统一进 RRF 融合，通道间无先后与优先级之分
  * <p>
- * 说明：LightRAG /query 无 per-request workspace，单实例即单图，本通道 Phase1 面向全局图召回；
- * 按 KB 隔离子图（借 file_path 归属过滤或多实例）留待后续阶段。mode=intent 时无 KB 意图则跳过，语义对齐关键词通道
+ * 说明：LightRAG /query 无 per-request workspace，单实例即单图，故本通道查全图后在结果侧按 file_path 归属切分；
+ * 真正的子图隔离需多实例，留待后续阶段
  */
 @Slf4j
 @Component
@@ -77,24 +77,32 @@ public class GraphSearchChannel implements SearchChannel {
     public SearchChannelResult search(SearchContext context) {
         long startTime = System.currentTimeMillis();
         try {
-            // 有 KB 意图则收敛到命中库过滤，否则空集=查全局图不过滤（与向量通道自动作用域一致：意图优先、无意图全局）
-            List<String> collections = extractIntentCollections(context);
+            // 作用域由引擎统一解析：定向则按命中库切分证据，全局则空集=全图证据全部归入主份
+            RetrievalScope scope = context.getRetrievalScope();
+            if (CollUtil.isEmpty(scope.targetCollections())) {
+                log.info("图谱检索未解析到有效知识库，跳过");
+                return emptyResult(startTime);
+            }
+            List<String> collections = scope.directed() ? scope.targetCollections() : List.of();
 
             int baseTopK = context.getBudget().recallBudget();
-            // 过滤生效时上浮请求量补召回；全局不过滤则用基础量
             int topK = CollUtil.isEmpty(collections) ? baseTopK : baseTopK * FILTER_TOPK_BOOST;
             String queryMode = graphProperties.getLightrag().getQueryMode();
 
-            List<RetrievedChunk> chunks = lightRagClient.retrieve(context.getMainQuestion(), queryMode, topK, collections);
+            GraphEvidence evidence = lightRagClient.retrieveByScope(
+                    context.getMainQuestion(), queryMode, topK, collections);
+            ScopeQuota quota = ScopeQuota.split(scope, baseTopK, properties.getScope().getSupplementRatio());
+            List<RetrievedChunk> primary = ScopeQuota.cap(evidence.matched(), quota.primary());
+            List<RetrievedChunk> supplement = ScopeQuota.cap(evidence.unmatched(), quota.supplement());
 
             long latency = System.currentTimeMillis() - startTime;
-            log.info("图谱检索完成，范围={}，检索到 {} 个证据，耗时 {}ms",
-                    CollUtil.isEmpty(collections) ? "全局" : collections, chunks.size(), latency);
+            log.info("图谱检索完成，范围={}，命中 {} 条，补充 {} 条，耗时 {}ms",
+                    CollUtil.isEmpty(collections) ? "全局" : collections, primary.size(), supplement.size(), latency);
 
             return SearchChannelResult.builder()
                     .channelType(SearchChannelType.GRAPH)
                     .channelName(getName())
-                    .chunks(chunks)
+                    .chunks(merge(primary, supplement))
                     .latencyMs(latency)
                     .build();
         } catch (Exception e) {
@@ -104,16 +112,21 @@ public class GraphSearchChannel implements SearchChannel {
     }
 
     /**
-     * 从意图识别结果提取 KB 意图对应的 collection 名称
+     * 两份候选按全图名次混排：两者的分数同出一个全局名次序，直接按分数降序即还原图谱自己的排序
+     * 不能主份在前、补充份拼在后 —— 那会让未命中份的强命中恒排在命中份的弱命中之后，
+     * RRF 按名次取分，等于名额给了、排序又把它按回去，抵消补充路的设计目的
      */
-    private List<String> extractIntentCollections(SearchContext context) {
-        if (CollUtil.isEmpty(context.getIntents())) {
-            return List.of();
+    private static List<RetrievedChunk> merge(List<RetrievedChunk> primary, List<RetrievedChunk> supplement) {
+        if (supplement.isEmpty()) {
+            return primary;
         }
-        List<NodeScore> allScores = context.getIntents().stream()
-                .flatMap(si -> si.nodeScores().stream())
-                .toList();
-        return NodeScoreFilters.kbCollections(allScores);
+        List<RetrievedChunk> merged = new ArrayList<>(primary.size() + supplement.size());
+        merged.addAll(primary);
+        merged.addAll(supplement);
+        merged.sort((a, b) -> Float.compare(
+                b.getScore() == null ? Float.NEGATIVE_INFINITY : b.getScore(),
+                a.getScore() == null ? Float.NEGATIVE_INFINITY : a.getScore()));
+        return merged;
     }
 
     private SearchChannelResult emptyResult(long startTime) {

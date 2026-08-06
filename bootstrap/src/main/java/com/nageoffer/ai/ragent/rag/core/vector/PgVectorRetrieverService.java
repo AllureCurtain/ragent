@@ -63,16 +63,6 @@ public class PgVectorRetrieverService implements VectorRetrieverService {
         return true;
     }
 
-    @Override
-    public List<RetrievedChunk> retrieveGlobal(String query, List<String> collectionNames, int candidateBudget) {
-        if (collectionNames == null || collectionNames.isEmpty()) {
-            return List.of();
-        }
-        float[] vector = embedAndNormalize(query);
-        // 全局检索：单条 SQL 在多库范围内做带总预算的 TopN 召回，替代逐库 fan-out
-        return queryByCollections(vector, collectionNames, candidateBudget);
-    }
-
     /**
      * 在指定 collection 范围内执行一次向量相似度检索
      * <p>

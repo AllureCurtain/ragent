@@ -109,31 +109,16 @@ public interface VectorRetrieverService {
     float[] embedAndNormalize(String query);
 
     /**
-     * 是否支持单次全局检索
+     * 是否支持在一次查询里跨多个 collection 过滤
      * <p>
-     * - 返回 true 时，全局检索通道会调用 {@link #retrieveGlobal} 一次性跨库召回
-     * - 返回 false 时，通道退化为逐库并行 fan-out（如 Milvus 每库一个 collection）
+     * - 返回 true 时，调用方用一次 {@link #retrieveByVector} 带总预算跨库召回（PG 单表按列过滤 / Milvus 共享库按标量过滤）
+     * - 返回 false 时，调用方退化为逐库并行 fan-out，每库各取总预算后统一截断
+     * 两个分支下「预算即总量」的语义一致，故新接入后端不覆写本方法只影响取数效率、不改变召回口径
      *
-     * @return 是否支持单次全局检索
+     * @return 是否支持跨库单次检索
      */
     default boolean supportsGlobalRetrieval() {
         return false;
-    }
-
-    /**
-     * 单次全局检索
-     * <p>
-     * 说明：
-     * - 在一批 collection 范围内做一次带总预算的全局 TopN 召回，而非逐库 TopK 再拼接
-     * - 仅当 {@link #supportsGlobalRetrieval()} 返回 true 时可用
-     *
-     * @param query           用户自然语言问题
-     * @param collectionNames 参与全局检索的 collection 列表
-     * @param candidateBudget 候选总预算（单次查询 LIMIT 上限）
-     * @return RetrievedChunk 列表（按相似度倒序）
-     */
-    default List<RetrievedChunk> retrieveGlobal(String query, List<String> collectionNames, int candidateBudget) {
-        throw new UnsupportedOperationException("该检索后端不支持单次全局检索");
     }
 }
 

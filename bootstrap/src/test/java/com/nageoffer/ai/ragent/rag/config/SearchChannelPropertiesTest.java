@@ -17,6 +17,7 @@
 
 package com.nageoffer.ai.ragent.rag.config;
 
+import com.nageoffer.ai.ragent.rag.constant.RAGConstant;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -45,11 +46,11 @@ class SearchChannelPropertiesTest {
     @Test
     @DisplayName("candidateBudget 默认取绝对值，=0 时回退传入的 Rerank 候选池上限")
     void resolveCandidateBudget() {
-        SearchChannelProperties.Global global = new SearchChannelProperties.Global();
-        assertEquals(40, global.resolveCandidateBudget(40), "默认 candidate-budget=0 应跟随候选池上限");
+        SearchChannelProperties.Vector vector = new SearchChannelProperties.Vector();
+        assertEquals(40, vector.resolveCandidateBudget(40), "默认 candidate-budget=0 应跟随候选池上限");
 
-        global.setCandidateBudget(80);
-        assertEquals(80, global.resolveCandidateBudget(40), "显式 candidate-budget 应优先");
+        vector.setCandidateBudget(80);
+        assertEquals(80, vector.resolveCandidateBudget(40), "显式 candidate-budget 应优先");
     }
 
     @Test
@@ -80,5 +81,53 @@ class SearchChannelPropertiesTest {
         SearchChannelProperties props = new SearchChannelProperties();
         props.getFusion().setRerankCandidateLimit(0);  // 不截断
         assertDoesNotThrow(props::afterPropertiesSet);
+    }
+
+    @Test
+    @DisplayName("minIntentScore 低于上游意图过滤下限时不会生效，启动即抛")
+    void minIntentScoreBelowUpstreamGateThrows() {
+        SearchChannelProperties props = new SearchChannelProperties();
+        props.getScope().setMinIntentScore(RAGConstant.INTENT_MIN_SCORE - 0.05);
+        assertThrows(IllegalStateException.class, props::afterPropertiesSet);
+
+        props.getScope().setMinIntentScore(RAGConstant.INTENT_MIN_SCORE);
+        assertDoesNotThrow(props::afterPropertiesSet, "等于下限时该配置仍有意义，不应拦截");
+    }
+
+    @Test
+    @DisplayName("candidateBudget < contextTopK 破坏不变式，启动即抛")
+    void candidateBudgetBelowContextTopKThrows() {
+        // 全局作用域的取数上限是第四段预算，此前不在漏斗校验内：配成 3 则全局路最多召回 3 条，
+        // 而 default-top-k 承诺 10 条，且只有低置信问题才会暴露症状
+        SearchChannelProperties props = new SearchChannelProperties();
+        props.getChannels().getVector().setCandidateBudget(3);
+        assertThrows(IllegalStateException.class, props::afterPropertiesSet);
+
+        props.getChannels().getVector().setCandidateBudget(0);
+        assertDoesNotThrow(props::afterPropertiesSet, "0 表示跟随候选池上限，不是越界值");
+    }
+
+    @Test
+    @DisplayName("confidenceThreshold 不高于 minIntentScore 或大于 1 时有一整条分支变死代码，启动即抛")
+    void confidenceThresholdOutsideGateRangeThrows() {
+        SearchChannelProperties props = new SearchChannelProperties();
+        props.getScope().setConfidenceThreshold(props.getScope().getMinIntentScore());
+        assertThrows(IllegalStateException.class, props::afterPropertiesSet,
+                "意图分已被 minIntentScore 过滤过一道，阈值不高于它则「低置信退化为全局」永不触发");
+
+        props.getScope().setConfidenceThreshold(1.5);
+        assertThrows(IllegalStateException.class, props::afterPropertiesSet,
+                "意图分按 0~1 输出，阈值大于 1 则定向路与补充路一起不可达");
+    }
+
+    @Test
+    @DisplayName("supplementRatio 取满 1 会把主路名额清零，启动即抛")
+    void supplementRatioAtOrAboveOneThrows() {
+        SearchChannelProperties props = new SearchChannelProperties();
+        props.getScope().setSupplementRatio(1.0);
+        assertThrows(IllegalStateException.class, props::afterPropertiesSet);
+
+        props.getScope().setSupplementRatio(0);
+        assertDoesNotThrow(props::afterPropertiesSet, "置零是关闭补充路的回退路径，不应拦截");
     }
 }

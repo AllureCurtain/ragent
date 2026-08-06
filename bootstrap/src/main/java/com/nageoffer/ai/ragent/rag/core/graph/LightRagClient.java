@@ -49,7 +49,7 @@ import java.util.regex.Pattern;
  * 仅当 rag.graph.type=lightrag 时注册；任何调用失败都降级（检索返回空、写入记 warn），绝不阻断主链路
  * <p>
  * 重要：LightRAG /query 无 per-request workspace 参数——workspace 为实例级（由服务端 env 固定）
- * 故单实例即单图；按 KB 隔离子图需多实例，或在结果侧按 file_path 归属过滤，均属后续阶段
+ * 故单实例即单图，KB 归属只能在结果侧按 file_path 判定（见 retrieveByScope）；真正的子图隔离需多实例，属后续阶段
  */
 @Slf4j
 @Component
@@ -79,33 +79,20 @@ public class LightRagClient {
     }
 
     /**
-     * 检索图谱上下文，返回命中的来源证据（引用）：全局视图、不按库过滤
-     *
-     * @param question 查询问题
-     * @param mode     LightRAG 查询模式 naive / local / global / hybrid / mix
-     * @param topK     期望候选数
-     */
-    public List<RetrievedChunk> retrieve(String question, String mode, int topK) {
-        return retrieve(question, mode, topK, List.of());
-    }
-
-    /**
-     * 检索图谱上下文，并按 collections 过滤到命中库（结果侧「意图定向」）
+     * 检索图谱上下文，并按 collections 把证据切成「命中库 / 未命中库」两份
      * <p>
-     * only_need_context=true 只取证据、不让 LightRAG 生成答案；证据回到主链路，
-     * 由既有融合 / Rerank / 上下文组装统一处理，与其它通道一视同仁
-     * <p>
-     * LightRAG /query 无 per-request workspace，此处查全局图后在 Java 侧按 file_path 归属过滤到命中库，
-     * 与向量 / 关键词的「意图域」语义对齐；collections 为空表示不过滤（全局视图）
+     * only_need_context=true 只取证据、不让 LightRAG 生成答案，证据回主链路与其它通道一视同仁；
+     * 一次查询即全图，归属判定在结果侧完成，故切分不额外增加调用；
+     * 调用方据此给两份各自的名额，避免意图判错时未命中库证据被整体丢弃
      *
      * @param question    查询问题
      * @param mode        LightRAG 查询模式 naive / local / global / hybrid / mix
      * @param topK        期望候选数
-     * @param collections 目标知识库 collection 名，空则不过滤
+     * @param collections 目标知识库 collection 名，空则全部归入命中份
      */
-    public List<RetrievedChunk> retrieve(String question, String mode, int topK, Collection<String> collections) {
+    public GraphEvidence retrieveByScope(String question, String mode, int topK, Collection<String> collections) {
         if (StrUtil.isBlank(question)) {
-            return List.of();
+            return GraphEvidence.empty();
         }
         try {
             ObjectNode body = objectMapper.createObjectNode();
@@ -118,10 +105,10 @@ public class LightRagClient {
                 body.put("top_k", topK);
             }
             JsonNode root = post("/query", body);
-            return root != null ? parseReferences(root, collections) : List.of();
+            return root != null ? parseReferences(root, collections) : GraphEvidence.empty();
         } catch (Exception e) {
             log.warn("LightRAG 检索失败，降级为空结果: {}", e.getMessage());
-            return List.of();
+            return GraphEvidence.empty();
         }
     }
 
@@ -345,21 +332,23 @@ public class LightRagClient {
      * 结构 {@code {"response":"...","references":[{"reference_id","file_path","content":[...]}]}}；
      * references 缺失或为空时回退：把 response 上下文整体作为一个证据块，防御式读取
      * <p>
-     * collections 非空时按 file_path 归属过滤到命中库；此时 response 兜底块无 file_path、无法归属，故一并跳过
+     * collections 非空时按 file_path 归属切成两份；response 兜底块无 file_path、无法归属，故切分生效时跳过
+     * <p>
+     * 两份共用同一个全局名次计数器：名次是 LightRAG 在全图上给出的相关性序，
+     * 若各自从 0 起算，未命中份的强命中会与命中份的弱命中拿到同样的分数，凭空抹平图谱自己的判断
      */
-    private List<RetrievedChunk> parseReferences(JsonNode root, Collection<String> collections) {
+    private GraphEvidence parseReferences(JsonNode root, Collection<String> collections) {
         boolean filterByCollection = collections != null && !collections.isEmpty();
         List<RetrievedChunk> chunks = new ArrayList<>();
+        List<RetrievedChunk> unmatched = new ArrayList<>();
         JsonNode references = root.path("references");
         if (references.isArray() && !references.isEmpty()) {
             int rank = 0;
             for (JsonNode ref : references) {
                 String refId = ref.path("reference_id").asText("");
                 String filePath = ref.path("file_path").asText("");
-                // 结果侧按命中库过滤：不属于任一目标 collection 的证据丢弃（丢弃项不占名次，保持保留项名次连续）
-                if (filterByCollection && !matchesCollection(filePath, collections)) {
-                    continue;
-                }
+                // 结果侧按命中库切分：两份各自有序，名次取自全图统一序号
+                boolean matched = !filterByCollection || matchesCollection(filePath, collections);
                 StringBuilder text = new StringBuilder();
                 JsonNode content = ref.path("content");
                 if (content.isArray()) {
@@ -380,9 +369,9 @@ public class LightRagClient {
                 // 从 file_path({collectionName}_{docId}) 解析归属 docId，让图谱证据与向量证据在文档层面对齐：
                 // 末端富化据此按 docId 补真实标题，并与同源向量证据聚合进同一文档块
                 String docId = parseDocId(filePath);
-                // 分数取按名次递减的中性分数 1/(rank+1)：无量纲，仅表达通道内相对顺序，
+                // 分数取按全图名次递减的中性分数 1/(rank+1)：无量纲，仅表达图谱视角下的相对顺序，
                 // 多通道时由 FusionPostProcessor(RRF) 重算，开启 Rerank 时由精排模型覆盖
-                chunks.add(RetrievedChunk.builder()
+                (matched ? chunks : unmatched).add(RetrievedChunk.builder()
                         .id(StrUtil.isNotBlank(refId) ? refId : "graph:" + rank)
                         .text(body)
                         .score(1.0f / (rank + 1))
@@ -392,10 +381,10 @@ public class LightRagClient {
                         .build());
                 rank++;
             }
-            return chunks;
+            return new GraphEvidence(chunks, unmatched);
         }
         // 回退：references 关闭或为空时，用 response 上下文兜底为单个证据块
-        // 过滤生效时该兜底块无 file_path、无法归属命中库，跳过以免破坏「意图定向」语义
+        // 切分生效时该兜底块无 file_path、无法归属，跳过以免破坏作用域语义
         if (!filterByCollection) {
             String context = root.path("response").asText("");
             if (StrUtil.isNotBlank(context)) {
@@ -406,7 +395,7 @@ public class LightRagClient {
                         .build());
             }
         }
-        return chunks;
+        return new GraphEvidence(chunks, unmatched);
     }
 
     /**

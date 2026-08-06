@@ -24,7 +24,10 @@ import com.nageoffer.ai.ragent.rag.core.retrieval.RetrieveRequest;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorRetrieverService;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
 
 /**
@@ -49,13 +52,17 @@ public class IntentParallelRetriever extends AbstractParallelRetriever<IntentPar
     public List<RetrievedChunk> retrieveByIntents(String question,
                                                   List<NodeScore> targets,
                                                   int recallBudget) {
-        List<IntentTask> intentTasks = targets.stream()
-                .map(nodeScore -> new IntentTask(
-                        nodeScore,
-                        resolveIntentTopK(nodeScore, recallBudget)
-                ))
-                .toList();
-        return super.executeParallelRetrieval(question, intentTasks, recallBudget);
+        return retrieveByIntents(question, targets, recallBudget, retrieverService.embedAndNormalize(question));
+    }
+
+    /**
+     * 按意图节点并行检索，复用调用方已算好的查询向量
+     */
+    public List<RetrievedChunk> retrieveByIntents(String question,
+                                                  List<NodeScore> targets,
+                                                  int recallBudget,
+                                                  float[] queryVector) {
+        return super.executeParallelRetrieval(question, buildTasks(targets, recallBudget), recallBudget, queryVector);
     }
 
     @Override
@@ -92,6 +99,49 @@ public class IntentParallelRetriever extends AbstractParallelRetriever<IntentPar
     @Override
     protected String getStatisticsName() {
         return "意图检索";
+    }
+
+    /**
+     * 计算命中意图的总召回深度
+     * <p>
+     * 定向路是每意图各取一份、并行 fan-out，故通道产能是各意图深度之和而非单个 recallBudget；
+     * 调用方据此切分主路 / 补充路名额，避免拿「每意图深度」当「通道总额度」用
+     */
+    public int resolveTotalDepth(List<NodeScore> targets, int recallBudget) {
+        return buildTasks(targets, recallBudget).stream()
+                .mapToInt(IntentTask::intentTopK)
+                .sum();
+    }
+
+    /**
+     * 把意图节点展开为扇出任务，并按「查询身份」去重
+     * <p>
+     * 一个任务就是一次 retrieveByVector，其结果只由 collection 集合与召回深度决定（问题与查询向量在请求内恒定），
+     * 故两项相同的任务必然返回同一份候选。留着它除了白跑一次检索，还会让同一 chunk 在通道原始列表里占两个名次，
+     * 被下游 RRF 按名次累加成双倍分；顺带把通道产能也算大一倍，连累补充路名额虚高
+     * <p>
+     * 不能改按 collection 去重：一个节点的多个 collection 是一次查询里的并集范围、总共只出 topK 条，
+     * 按 collection 计数会把多库节点的产能算成 库数 × topK
+     * <p>
+     * {@link #resolveTotalDepth} 与实际扇出共用本方法，保证「通道产能」与真实查询数永不漂移
+     */
+    private List<IntentTask> buildTasks(List<NodeScore> targets, int recallBudget) {
+        record QueryIdentity(Set<String> collections, int topK) {
+        }
+        Map<QueryIdentity, IntentTask> tasks = new LinkedHashMap<>();
+        for (NodeScore nodeScore : targets) {
+            int intentTopK = resolveIntentTopK(nodeScore, recallBudget);
+            Set<String> collections = Set.copyOf(collectionsOf(nodeScore));
+            tasks.putIfAbsent(new QueryIdentity(collections, intentTopK), new IntentTask(nodeScore, intentTopK));
+        }
+        return List.copyOf(tasks.values());
+    }
+
+    private static List<String> collectionsOf(NodeScore nodeScore) {
+        if (nodeScore == null || nodeScore.getNode() == null) {
+            return List.of();
+        }
+        return nodeScore.getNode().getEffectiveCollectionNames();
     }
 
     /**

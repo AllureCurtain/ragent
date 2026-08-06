@@ -71,17 +71,6 @@ public class MilvusVectorRetrieverService implements VectorRetrieverService {
         return true;
     }
 
-    @Override
-    public List<RetrievedChunk> retrieveGlobal(String query, List<String> collectionNames, int candidateBudget) {
-        if (collectionNames == null || collectionNames.isEmpty()) {
-            return List.of();
-        }
-        float[] norm = embedAndNormalize(query);
-        // 全局检索：单次在共享 collection 内按 collection_name in [...] 跨库召回，替代逐库 fan-out
-        String filter = buildCollectionFilter(collectionNames);
-        return searchShared(norm, filter, candidateBudget);
-    }
-
     private String buildCollectionFilter(List<String> collectionNames) {
         if (collectionNames == null || collectionNames.isEmpty()) {
             return null;

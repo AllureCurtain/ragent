@@ -17,17 +17,11 @@
 
 package com.nageoffer.ai.ragent.rag.core.vector.strategy;
 
-import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
+import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.core.intent.IntentNode;
 import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
 import com.nageoffer.ai.ragent.rag.core.retrieval.RetrieveRequest;
-import com.nageoffer.ai.ragent.rag.core.retrieval.RetrievalBudget;
-import com.nageoffer.ai.ragent.rag.core.retrieval.channel.KbCollectionProvider;
-import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannelResult;
-import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchContext;
-import com.nageoffer.ai.ragent.rag.core.retrieval.channel.VectorSearchChannel;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorRetrieverService;
-import com.nageoffer.ai.ragent.rag.dto.SubQuestionIntent;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -38,9 +32,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class IntentParallelRetrieverTest {
@@ -74,34 +68,18 @@ class IntentParallelRetrieverTest {
     @DisplayName("未绑定Collection的意图不会误查全库")
     void emptyCollectionsSkipDirectedRetrieval() {
         VectorRetrieverService retrieverService = mock(VectorRetrieverService.class);
-        KbCollectionProvider kbCollectionProvider = mock(KbCollectionProvider.class);
-        when(kbCollectionProvider.listActiveCollections()).thenReturn(List.of());
+        when(retrieverService.embedAndNormalize("如何申请？")).thenReturn(new float[]{0.6F, 0.8F});
 
         IntentNode node = IntentNode.builder()
                 .id("empty-kb-intent")
                 .name("未配置知识库")
                 .build();
-        SearchContext context = SearchContext.builder()
-                .originalQuestion("如何申请？")
-                .intents(List.of(new SubQuestionIntent(
-                        "如何申请？",
-                        List.of(NodeScore.builder().node(node).score(0.95).build())
-                )))
-                .budget(RetrievalBudget.uniform(20))
-                .build();
+        NodeScore nodeScore = NodeScore.builder().node(node).score(0.95).build();
 
-        VectorSearchChannel channel = new VectorSearchChannel(
-                retrieverService,
-                new SearchChannelProperties(),
-                kbCollectionProvider,
-                Runnable::run
-        );
+        IntentParallelRetriever retriever = new IntentParallelRetriever(retrieverService, Runnable::run);
+        List<RetrievedChunk> chunks = retriever.retrieveByIntents("如何申请？", List.of(nodeScore), 20);
 
-        SearchChannelResult result = channel.search(context);
-
-        assertTrue(result.getChunks().isEmpty());
-        assertEquals("global", result.getMetadata().get("scope"));
-        verify(kbCollectionProvider).listActiveCollections();
-        verifyNoInteractions(retrieverService);
+        assertTrue(chunks.isEmpty());
+        verify(retrieverService, never()).retrieveByVector(any(float[].class), any(RetrieveRequest.class));
     }
 }

@@ -17,6 +17,7 @@
 
 package com.nageoffer.ai.ragent.rag.core.retrieval.postprocessor;
 
+import cn.hutool.core.util.StrUtil;
 import cn.hutool.crypto.digest.DigestUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannelResult;
@@ -35,19 +36,19 @@ import java.util.Set;
  * {@link RetrievedChunk} 不携带来源通道字段（框架层 DTO 保持纯净），故按 chunk key 从不可变的
  * {@link SearchChannelResult} 反查每条证据来自哪些通道，供融合 / Rerank 打印「各通道贡献 / 存活率」的可观测日志
  * <p>
- * key 规则与去重 / 融合完全一致：优先 id，缺失时退化为文本 SHA-256，保证同一 chunk 在各处 key 相同；
+ * key 规则：优先 id，缺失时退化为文本 SHA-256，保证同一 chunk 在通道去重 / 融合 / 归因各处 key 相同；
  * 不能用 String.hashCode()——32 位哈希碰撞会把内容不同的 chunk 误判为同一来源
  */
-final class ChannelAttribution {
+public final class ChannelAttribution {
 
     private ChannelAttribution() {
     }
 
     /**
-     * 生成 chunk 归因键，与去重 / 融合处理器保持一致
+     * 生成 chunk 归因键，是全链路唯一的一处 chunk 身份定义
      */
-    static String keyOf(RetrievedChunk chunk) {
-        return chunk.getId() != null
+    public static String keyOf(RetrievedChunk chunk) {
+        return StrUtil.isNotBlank(chunk.getId())
                 ? chunk.getId()
                 : DigestUtil.sha256Hex(chunk.getText() == null ? "" : chunk.getText());
     }

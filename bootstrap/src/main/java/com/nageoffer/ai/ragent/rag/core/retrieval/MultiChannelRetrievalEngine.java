@@ -20,6 +20,7 @@ package com.nageoffer.ai.ragent.rag.core.retrieval;
 import cn.hutool.core.collection.CollUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.framework.trace.RagTraceNode;
+import com.nageoffer.ai.ragent.rag.core.retrieval.channel.RetrievalScopeResolver;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannel;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannelResult;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchContext;
@@ -51,19 +52,22 @@ public class MultiChannelRetrievalEngine {
 
     private final List<SearchChannel> searchChannels;
     private final List<SearchResultPostProcessor> postProcessors;
+    private final RetrievalScopeResolver retrievalScopeResolver;
     private final Executor ragRetrievalExecutor;
 
     /**
      * 执行多通道检索（仅 KB 场景）
+     * <p>
+     * 按子问题逐个调用：检索问题与作用域都取自同一个子问题，二者同源
      *
-     * @param subIntents 子问题意图列表
-     * @param budget     检索预算（召回扇出 / Rerank 候选池上限 / 最终条数）
+     * @param subIntent 子问题及其意图
+     * @param budget    检索预算（召回扇出 / Rerank 候选池上限 / 最终条数）
      * @return 检索到的 Chunk 列表
      */
     @RagTraceNode(name = "multi-channel-retrieval", type = "RETRIEVE_CHANNEL")
-    public List<RetrievedChunk> retrieveKnowledgeChannels(List<SubQuestionIntent> subIntents, RetrievalBudget budget) {
+    public List<RetrievedChunk> retrieveKnowledgeChannels(SubQuestionIntent subIntent, RetrievalBudget budget) {
         // 构建检索上下文
-        SearchContext context = buildSearchContext(subIntents, budget);
+        SearchContext context = buildSearchContext(subIntent, budget);
 
         // 【阶段1：多通道并行检索】
         List<SearchChannelResult> channelResults = executeSearchChannels(context);
@@ -88,6 +92,8 @@ public class MultiChannelRetrievalEngine {
                 .toList();
 
         if (enabledChannels.isEmpty()) {
+            // 全站无任何知识召回、退化为裸 LLM，属配置事故而非正常降级，不能静默
+            log.warn("没有任何启用的检索通道，本次不做知识召回；请检查 rag.search.channels.*.enabled 与对应后端开关");
             return List.of();
         }
 
@@ -206,15 +212,18 @@ public class MultiChannelRetrievalEngine {
 
     /**
      * 构建检索上下文
+     * 作用域在此处算一次挂进上下文，各通道只读不判，保证同一子问题内三条通道的检索范围一致
      */
-    private SearchContext buildSearchContext(List<SubQuestionIntent> subIntents, RetrievalBudget budget) {
-        String question = CollUtil.isEmpty(subIntents) ? "" : subIntents.get(0).subQuestion();
+    private SearchContext buildSearchContext(SubQuestionIntent subIntent, RetrievalBudget budget) {
+        List<SubQuestionIntent> subIntents = List.of(subIntent);
+        String question = subIntent.subQuestion();
 
         return SearchContext.builder()
                 .originalQuestion(question)
                 .rewrittenQuestion(question)
                 .intents(subIntents)
                 .budget(budget)
+                .retrievalScope(retrievalScopeResolver.resolve(subIntents))
                 .build();
     }
 }

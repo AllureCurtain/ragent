@@ -65,8 +65,19 @@ public abstract class AbstractParallelRetriever<T> {
     public final List<RetrievedChunk> executeParallelRetrieval(String question,
                                                                List<T> targets,
                                                                int topK) {
-        float[] queryVector = retrieverService.embedAndNormalize(question);
+        return executeParallelRetrieval(question, targets, topK, retrieverService.embedAndNormalize(question));
+    }
 
+    /**
+     * 并行检索模板方法，复用调用方已算好的查询向量
+     * 供同一次请求内还有其他向量取数路（如向量通道的补充路）时共用一次 embedding
+     *
+     * @param queryVector 已归一化的查询向量
+     */
+    public final List<RetrievedChunk> executeParallelRetrieval(String question,
+                                                               List<T> targets,
+                                                               int topK,
+                                                               float[] queryVector) {
         // 1. 创建 Future 列表
         record RetrievalFuture<T>(T target, CompletableFuture<List<RetrievedChunk>> future) {
         }
