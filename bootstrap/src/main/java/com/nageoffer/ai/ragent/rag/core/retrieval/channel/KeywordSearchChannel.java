@@ -26,7 +26,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -74,7 +73,7 @@ public class KeywordSearchChannel implements SearchChannel {
             List<String> collections = scope.targetCollections();
             if (CollUtil.isEmpty(collections)) {
                 log.info("关键词检索未解析到目标知识库，跳过");
-                return emptyResult(startTime);
+                return emptyResult(System.currentTimeMillis() - startTime);
             }
 
             String question = context.getMainQuestion();
@@ -101,41 +100,16 @@ public class KeywordSearchChannel implements SearchChannel {
             return SearchChannelResult.builder()
                     .channelType(SearchChannelType.KEYWORD)
                     .channelName(getName())
-                    .chunks(merge(primary, supplement))
+                    .chunks(ChunkRanking.mergeByScore(primary, supplement))
                     .latencyMs(latency)
                     .build();
         } catch (Exception e) {
             log.error("关键词检索失败", e);
-            return emptyResult(startTime);
+            return emptyResult(System.currentTimeMillis() - startTime);
         }
     }
 
     private double supplementRatio() {
         return properties.getScope().getSupplementRatio();
-    }
-
-    /**
-     * 合并两路候选并按 BM25 分降序，兑现「通道出口按相关性有序」这一下游 RRF 依赖的不变式
-     */
-    private static List<RetrievedChunk> merge(List<RetrievedChunk> primary, List<RetrievedChunk> supplement) {
-        if (supplement.isEmpty()) {
-            return primary;
-        }
-        List<RetrievedChunk> merged = new ArrayList<>(primary.size() + supplement.size());
-        merged.addAll(primary);
-        merged.addAll(supplement);
-        merged.sort((a, b) -> Float.compare(
-                b.getScore() == null ? Float.NEGATIVE_INFINITY : b.getScore(),
-                a.getScore() == null ? Float.NEGATIVE_INFINITY : a.getScore()));
-        return merged;
-    }
-
-    private SearchChannelResult emptyResult(long startTime) {
-        return SearchChannelResult.builder()
-                .channelType(SearchChannelType.KEYWORD)
-                .channelName(getName())
-                .chunks(List.of())
-                .latencyMs(System.currentTimeMillis() - startTime)
-                .build();
     }
 }

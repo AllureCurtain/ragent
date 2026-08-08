@@ -26,8 +26,6 @@ import com.nageoffer.ai.ragent.rag.core.vector.strategy.CollectionParallelRetrie
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -99,12 +97,7 @@ public class VectorSearchChannel implements SearchChannel {
 
         } catch (Exception e) {
             log.error("向量检索失败", e);
-            return SearchChannelResult.builder()
-                    .channelType(SearchChannelType.VECTOR)
-                    .channelName(getName())
-                    .chunks(List.of())
-                    .latencyMs(System.currentTimeMillis() - startTime)
-                    .build();
+            return emptyResult(System.currentTimeMillis() - startTime);
         }
     }
 
@@ -138,9 +131,9 @@ public class VectorSearchChannel implements SearchChannel {
         List<RetrievedChunk> supplement = supplementTask.join();
 
         log.info("向量检索完成（定向），意图 top1={}，命中 {} 库 {} 条（最高余弦 {}），补充 {} 库 {} 条（最高余弦 {}）",
-                scope.topScore(), scope.targetCollections().size(), directed.size(), topScoreOf(directed),
-                scope.supplementCollections().size(), supplement.size(), topScoreOf(supplement));
-        return merge(directed, supplement);
+                scope.topScore(), scope.targetCollections().size(), directed.size(), ChunkRanking.topScoreOf(directed),
+                scope.supplementCollections().size(), supplement.size(), ChunkRanking.topScoreOf(supplement));
+        return ChunkRanking.mergeByScore(directed, supplement);
     }
 
     /**
@@ -174,7 +167,7 @@ public class VectorSearchChannel implements SearchChannel {
                 scope.targetCollections(), globalFetchSize(context.getBudget()));
 
         log.info("向量检索完成（全局），意图 top1={}，{} 库 {} 条（最高余弦 {}）",
-                scope.topScore(), scope.targetCollections().size(), chunks.size(), topScoreOf(chunks));
+                scope.topScore(), scope.targetCollections().size(), chunks.size(), ChunkRanking.topScoreOf(chunks));
         return chunks;
     }
 
@@ -185,7 +178,8 @@ public class VectorSearchChannel implements SearchChannel {
      * 每库各取 budget 再统一截断——多取是为了拿到真正的全局前 budget 条（哪个库有好料事前不知道），
      * 但截断不能省：省掉它 budget 就从「总量」悄悄变成「每库上限」，补充路名额被放大成 库数 × 名额
      * <p>
-     * 排序在截断之前，两者都不能省：先排后截才是取全局最优的前 budget 条
+     * 排序在截断之前，且后端返回序不能直接信：PG 开了 {@code hnsw.iterative_scan=relaxed_order}，
+     * pgvector 在该模式下允许轻微乱序且规划器不补 Sort 节点，先排后截才是取全局最优的前 budget 条
      */
     private List<RetrievedChunk> retrieveOver(String question, float[] queryVector, List<String> collections, int budget) {
         if (collections.isEmpty()) {
@@ -198,22 +192,7 @@ public class VectorSearchChannel implements SearchChannel {
                 .topK(budget)
                 .build())
                 : globalRetriever.executeParallelRetrieval(question, collections, budget, queryVector);
-        return ScopeQuota.cap(sortedByScore(chunks), budget);
-    }
-
-    /**
-     * 按相关性降序，兑现「通道出口全局有序」这一下游 RRF 依赖的不变式
-     * <p>
-     * 后端返回序不能直接信：PG 开了 {@code hnsw.iterative_scan=relaxed_order}，pgvector 在该模式下允许
-     * 轻微乱序且规划器不补 Sort 节点。其余取数路径（fan-out 归并、两路 merge）都排过，唯独这条曾原样返回
-     */
-    private static List<RetrievedChunk> sortedByScore(List<RetrievedChunk> chunks) {
-        if (chunks.size() < 2) {
-            return chunks;
-        }
-        List<RetrievedChunk> sorted = new ArrayList<>(chunks);
-        sorted.sort(BY_SCORE_DESC);
-        return sorted;
+        return ScopeQuota.cap(ChunkRanking.sortedByScore(chunks), budget);
     }
 
     /**
@@ -230,36 +209,5 @@ public class VectorSearchChannel implements SearchChannel {
 
     private double supplementRatio() {
         return properties.getScope().getSupplementRatio();
-    }
-
-    /**
-     * 合并两路候选并按相关性降序，兑现「通道出口全局有序」这一下游 RRF 依赖的不变式
-     */
-    private static List<RetrievedChunk> merge(List<RetrievedChunk> directed, List<RetrievedChunk> supplement) {
-        if (supplement.isEmpty()) {
-            return directed;
-        }
-        List<RetrievedChunk> merged = new ArrayList<>(directed.size() + supplement.size());
-        merged.addAll(directed);
-        merged.addAll(supplement);
-        merged.sort(BY_SCORE_DESC);
-        return merged;
-    }
-
-    /**
-     * 相关性降序，缺分沉底
-     */
-    private static final Comparator<RetrievedChunk> BY_SCORE_DESC =
-            (a, b) -> Float.compare(scoreOf(b), scoreOf(a));
-
-    /**
-     * 取一路候选的最高余弦，供阈值校准观测
-     */
-    private static float topScoreOf(List<RetrievedChunk> chunks) {
-        return chunks.isEmpty() ? 0F : scoreOf(chunks.get(0));
-    }
-
-    private static float scoreOf(RetrievedChunk chunk) {
-        return chunk.getScore() == null ? Float.NEGATIVE_INFINITY : chunk.getScore();
     }
 }

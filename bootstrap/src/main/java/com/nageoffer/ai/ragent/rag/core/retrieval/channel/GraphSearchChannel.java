@@ -28,7 +28,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -81,7 +80,7 @@ public class GraphSearchChannel implements SearchChannel {
             RetrievalScope scope = context.getRetrievalScope();
             if (CollUtil.isEmpty(scope.targetCollections())) {
                 log.info("图谱检索未解析到有效知识库，跳过");
-                return emptyResult(startTime);
+                return emptyResult(System.currentTimeMillis() - startTime);
             }
             List<String> collections = scope.directed() ? scope.targetCollections() : List.of();
 
@@ -99,42 +98,16 @@ public class GraphSearchChannel implements SearchChannel {
             log.info("图谱检索完成，范围={}，命中 {} 条，补充 {} 条，耗时 {}ms",
                     CollUtil.isEmpty(collections) ? "全局" : collections, primary.size(), supplement.size(), latency);
 
+            // 两份候选的分数同出一个全图名次序，按分混排即还原图谱自己的排序
             return SearchChannelResult.builder()
                     .channelType(SearchChannelType.GRAPH)
                     .channelName(getName())
-                    .chunks(merge(primary, supplement))
+                    .chunks(ChunkRanking.mergeByScore(primary, supplement))
                     .latencyMs(latency)
                     .build();
         } catch (Exception e) {
             log.error("图谱检索失败", e);
-            return emptyResult(startTime);
+            return emptyResult(System.currentTimeMillis() - startTime);
         }
-    }
-
-    /**
-     * 两份候选按全图名次混排：两者的分数同出一个全局名次序，直接按分数降序即还原图谱自己的排序
-     * 不能主份在前、补充份拼在后 —— 那会让未命中份的强命中恒排在命中份的弱命中之后，
-     * RRF 按名次取分，等于名额给了、排序又把它按回去，抵消补充路的设计目的
-     */
-    private static List<RetrievedChunk> merge(List<RetrievedChunk> primary, List<RetrievedChunk> supplement) {
-        if (supplement.isEmpty()) {
-            return primary;
-        }
-        List<RetrievedChunk> merged = new ArrayList<>(primary.size() + supplement.size());
-        merged.addAll(primary);
-        merged.addAll(supplement);
-        merged.sort((a, b) -> Float.compare(
-                b.getScore() == null ? Float.NEGATIVE_INFINITY : b.getScore(),
-                a.getScore() == null ? Float.NEGATIVE_INFINITY : a.getScore()));
-        return merged;
-    }
-
-    private SearchChannelResult emptyResult(long startTime) {
-        return SearchChannelResult.builder()
-                .channelType(SearchChannelType.GRAPH)
-                .channelName(getName())
-                .chunks(List.of())
-                .latencyMs(System.currentTimeMillis() - startTime)
-                .build();
     }
 }

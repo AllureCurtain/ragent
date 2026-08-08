@@ -90,7 +90,7 @@ public class CollectionParallelRetriever {
 
         // 各库并行返回的子列表仅在自身内部有序，拼接后跨库名次等于拼接顺序，
         // 会让下游截断与 RRF 的名次基准失真，故在出口统一按 score 降序
-        allChunks.sort((a, b) -> Float.compare(scoreOf(b), scoreOf(a)));
+        allChunks.sort(RetrievedChunk.BY_SCORE_DESC);
 
         log.info("全局检索 检索统计 - 总目标数: {}, 成功: {}, 失败: {}, 检索到 Chunk 总数: {}",
                 collections.size(), successCount, failureCount, allChunks.size());
@@ -115,12 +115,5 @@ public class CollectionParallelRetriever {
             log.error("在 collection {} 中检索失败，错误: {}", collectionName, e.getMessage(), e);
             return List.of();
         }
-    }
-
-    /**
-     * 取 chunk 得分，缺失时视为最低分沉底
-     */
-    private static float scoreOf(RetrievedChunk chunk) {
-        return chunk.getScore() == null ? Float.NEGATIVE_INFINITY : chunk.getScore();
     }
 }

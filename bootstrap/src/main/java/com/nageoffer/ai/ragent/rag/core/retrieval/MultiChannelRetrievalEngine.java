@@ -151,7 +151,7 @@ public class MultiChannelRetrievalEngine {
                                 return channel.search(context);
                             } catch (Exception e) {
                                 log.error("检索通道 {} 执行失败", channel.getName(), e);
-                                return emptyResult(channel);
+                                return channel.emptyResult(0);
                             }
                         },
                         ragRetrievalExecutor
@@ -253,16 +253,8 @@ public class MultiChannelRetrievalEngine {
                     } else {
                         log.error("检索通道 {} 异步执行失败", channel.getName(), cause);
                     }
-                    return emptyResult(channel);
+                    return channel.emptyResult(0);
                 });
-    }
-
-    private SearchChannelResult emptyResult(SearchChannel channel) {
-        return SearchChannelResult.builder()
-                .channelType(channel.getType())
-                .channelName(channel.getName())
-                .chunks(List.of())
-                .build();
     }
 
     /**
