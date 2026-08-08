@@ -147,6 +147,7 @@ rag:
       confidence-threshold: 0.6    # KB 意图最高分低于此值 → 退化为全库检索
       supplement-ratio: 0.25       # 定向时各通道从自身产出额度划给「未命中库」的保底比例，兜住意图判错；0=关闭补充路，命中库已覆盖全库时自动不补
     channels:
+      timeout-ms: 15000     # 单通道超时上限（毫秒）：超时通道按空结果降级、其余通道照常融合，不让最慢一条（如图谱 mix 最长 30s）钳制整次检索；<=0 不限时
       vector:
         enabled: true       # 向量通道总开关
         candidate-budget: 0 # 全局作用域取数上限；0=跟随 rerank-candidate-limit（超出即被下游截断属空转），确需更宽跨库广度时填正值

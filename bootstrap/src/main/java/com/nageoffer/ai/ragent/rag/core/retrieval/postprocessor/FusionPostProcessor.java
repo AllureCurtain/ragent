@@ -135,10 +135,12 @@ public class FusionPostProcessor implements SearchResultPostProcessor {
                 channelCount, properties.getFusion().getRrfK(), ranked.size(),
                 limit > 0 ? String.valueOf(limit) : "不限", candidates.size());
 
-        // 归因日志：送入 Rerank 的候选按来源通道分布，便于观测各通道（尤其新接入的图谱）实际贡献了多少候选
+        // 截断是弱势通道证据消失的第一现场：池内与出池分布并排打，某通道被整体截没时在此可见，
+        // 下游 Rerank 的存活率日志看到的输入已经是 0
         if (channelCount > 1) {
             Map<String, Set<SearchChannelType>> index = ChannelAttribution.index(results);
-            log.info("检索归因 - 送入 Rerank 候选按通道: {}",
+            log.info("检索归因 - 融合池按通道: {}, 送入 Rerank 按通道: {}",
+                    ChannelAttribution.format(ChannelAttribution.countByChannel(ranked, index)),
                     ChannelAttribution.format(ChannelAttribution.countByChannel(candidates, index)));
         }
         return candidates;

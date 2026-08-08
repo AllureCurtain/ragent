@@ -39,8 +39,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Predicate;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * LightRAG 微服务 HTTP 客户端
@@ -57,14 +55,6 @@ import java.util.regex.Pattern;
 public class LightRagClient {
 
     private static final MediaType JSON = MediaType.parse("application/json");
-
-    /**
-     * file_path 中归属 docId 的匹配模式
-     * <p>
-     * 写入时 file_source 编码为 {collectionName}_{docId}，docId 为雪花纯数字；取 file_path 中最后一段连续数字为归属 docId，
-     * 兼容服务端可能对 file_path 追加的扩展名 / 路径修饰
-     */
-    private static final Pattern DOC_ID_PATTERN = Pattern.compile("(\\d+)");
 
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -226,16 +216,19 @@ public class LightRagClient {
     }
 
     /**
-     * 删除某知识库的全部图谱数据（按 collectionName 前缀 token 匹配）
+     * 删除某知识库的全部图谱数据
      * <p>
-     * file_source 编码为 {collectionName}_{docId}，故按 "{collectionName}_" token 命中该库全部文档
+     * 按 {@link GraphFileSource#parse} 解析出的库名等值匹配：库名可互为前缀（kb 与 kb_hr 合法共存），
+     * 子串匹配会连带删光别库的图谱数据且不可逆
      */
     public void deleteByCollection(String collectionName) {
         if (StrUtil.isBlank(collectionName)) {
             return;
         }
-        String token = collectionName + "_";
-        deleteMatching(filePath -> filePath.contains(token), "collection=" + collectionName);
+        deleteMatching(filePath -> {
+            GraphFileSource source = GraphFileSource.parse(filePath);
+            return source != null && collectionName.equals(source.collectionName());
+        }, "collection=" + collectionName);
     }
 
     /**
@@ -399,37 +392,21 @@ public class LightRagClient {
     }
 
     /**
-     * file_path 是否命中给定任一 collection
+     * file_path 是否归属给定任一 collection
      * <p>
-     * 按 {collectionName}_ 前缀 token 判断，与 deleteByCollection 同一 token 语义，抗服务端 file_path 归一化
+     * 解析出全名后等值比较，与 deleteByCollection 同一判定；解析失败视为不归属，
+     * 证据落入补充份而非主份，比误归属安全
      */
     private boolean matchesCollection(String filePath, Collection<String> collections) {
-        if (StrUtil.isBlank(filePath)) {
-            return false;
-        }
-        for (String collectionName : collections) {
-            if (StrUtil.isNotBlank(collectionName) && filePath.contains(collectionName + "_")) {
-                return true;
-            }
-        }
-        return false;
+        GraphFileSource source = GraphFileSource.parse(filePath);
+        return source != null && collections.contains(source.collectionName());
     }
 
     /**
-     * 从 file_path 解析归属 docId
-     * <p>
-     * 取最后一段连续数字：docId 为雪花纯数字且是 {collectionName}_{docId} 的末段，故为 file_path 中最后一个数字串；
-     * 无数字则返回 null（图谱证据退化为无 docId，仅影响文档聚合、不影响召回）
+     * 从 file_path 解析归属 docId，不符合编码返回 null（仅影响文档聚合与标题富化，不影响召回）
      */
     private String parseDocId(String filePath) {
-        if (StrUtil.isBlank(filePath)) {
-            return null;
-        }
-        Matcher matcher = DOC_ID_PATTERN.matcher(filePath);
-        String docId = null;
-        while (matcher.find()) {
-            docId = matcher.group(1);
-        }
-        return docId;
+        GraphFileSource source = GraphFileSource.parse(filePath);
+        return source != null ? source.docId() : null;
     }
 }

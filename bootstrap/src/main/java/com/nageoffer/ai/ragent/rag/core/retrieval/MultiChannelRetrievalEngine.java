@@ -21,6 +21,7 @@ import cn.hutool.core.collection.CollUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunkKey;
 import com.nageoffer.ai.ragent.framework.trace.RagTraceNode;
+import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.RetrievalScopeResolver;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannel;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannelResult;
@@ -39,7 +40,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -59,6 +63,7 @@ public class MultiChannelRetrievalEngine {
     private final List<SearchResultPostProcessor> postProcessors;
     private final RetrievalScopeResolver retrievalScopeResolver;
     private final Executor ragRetrievalExecutor;
+    private final SearchChannelProperties searchProperties;
 
     /**
      * 执行多通道检索（仅 KB 场景）
@@ -112,8 +117,9 @@ public class MultiChannelRetrievalEngine {
         log.info("启用的检索通道：{}",
                 enabledChannels.stream().map(SearchChannel::getName).toList());
 
+        long channelTimeoutMs = searchProperties.getChannels().getTimeoutMs();
         List<CompletableFuture<SearchChannelResult>> futures = enabledChannels.stream()
-                .map(channel -> CompletableFuture.supplyAsync(
+                .map(channel -> withTimeout(CompletableFuture.supplyAsync(
                         () -> {
                             try {
                                 log.info("执行检索通道：{}", channel.getName());
@@ -124,7 +130,7 @@ public class MultiChannelRetrievalEngine {
                             }
                         },
                         ragRetrievalExecutor
-                ))
+                ), channel, channelTimeoutMs))
                 .toList();
 
         int successCount = 0;
@@ -203,6 +209,27 @@ public class MultiChannelRetrievalEngine {
                 initialSize, chunks.size());
 
         return chunks;
+    }
+
+    /**
+     * 通道级超时：超过预算的通道按空结果降级，不让最慢一条钳制同一子问题里其余通道的融合
+     * 只放弃结果、不中断执行，任务仍在池内跑完，超时值过小等于整路白算
+     */
+    private CompletableFuture<SearchChannelResult> withTimeout(CompletableFuture<SearchChannelResult> future,
+                                                               SearchChannel channel, long timeoutMs) {
+        if (timeoutMs <= 0) {
+            return future;
+        }
+        return future.orTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .exceptionally(e -> {
+                    Throwable cause = e instanceof CompletionException && e.getCause() != null ? e.getCause() : e;
+                    if (cause instanceof TimeoutException) {
+                        log.warn("检索通道 {} 超过通道级超时 {}ms，放弃其结果，其余通道照常融合", channel.getName(), timeoutMs);
+                    } else {
+                        log.error("检索通道 {} 异步执行失败", channel.getName(), cause);
+                    }
+                    return emptyResult(channel);
+                });
     }
 
     private SearchChannelResult emptyResult(SearchChannel channel) {

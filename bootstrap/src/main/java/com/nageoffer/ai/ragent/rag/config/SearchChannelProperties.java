@@ -164,6 +164,13 @@ public class SearchChannelProperties implements InitializingBean {
     public static class Channels {
 
         /**
+         * 单通道超时上限（毫秒）
+         * 通道并行执行、整次检索耗时钳制在最慢一条上：图谱 mix 模式最长可到 LightRAG 客户端超时 30s，
+         * 超过此值的通道按空结果降级、其余通道照常融合；<=0 不限时，退回等最慢通道
+         */
+        private long timeoutMs = 15_000;
+
+        /**
          * 向量检索配置
          */
         private Vector vector = new Vector();
