@@ -22,23 +22,86 @@ import com.nageoffer.ai.ragent.rag.core.retrieval.RetrieveRequest;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorRetrieverService;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
 /**
- * Collection 并行检索器
- * 继承模板类，实现 Collection 特定的检索逻辑
+ * 逐库并行检索器
+ * <p>
+ * 后端不支持跨库单查时的兜底取数路：对给定 collection 集合并行各取一份、汇总排序
+ * 单库失败只损失该库结果，不影响其余库
  */
 @Slf4j
-public class CollectionParallelRetriever extends AbstractParallelRetriever<String> {
+public class CollectionParallelRetriever {
+
+    private final VectorRetrieverService retrieverService;
+    private final Executor executor;
 
     public CollectionParallelRetriever(VectorRetrieverService retrieverService,
                                        Executor executor) {
-        super(retrieverService, executor);
+        this.retrieverService = retrieverService;
+        this.executor = executor;
     }
 
-    @Override
-    protected List<RetrievedChunk> createRetrievalTask(String question, String collectionName, float[] queryVector, int topK) {
+    /**
+     * 并行检索，内部生成查询向量
+     */
+    public List<RetrievedChunk> executeParallelRetrieval(String question,
+                                                         List<String> collections,
+                                                         int topK) {
+        return executeParallelRetrieval(question, collections, topK, retrieverService.embedAndNormalize(question));
+    }
+
+    /**
+     * 并行检索，复用调用方已算好的查询向量
+     * 供同一次请求内还有其他向量取数路（如向量通道的补充路）时共用一次 embedding
+     *
+     * @param queryVector 已归一化的查询向量
+     */
+    public List<RetrievedChunk> executeParallelRetrieval(String question,
+                                                         List<String> collections,
+                                                         int topK,
+                                                         float[] queryVector) {
+        record RetrievalFuture(String collection, CompletableFuture<List<RetrievedChunk>> future) {
+        }
+
+        List<RetrievalFuture> futures = collections.stream()
+                .map(collection -> new RetrievalFuture(collection, CompletableFuture.supplyAsync(
+                        () -> retrieveOne(question, collection, queryVector, topK),
+                        executor
+                )))
+                .toList();
+
+        List<RetrievedChunk> allChunks = new ArrayList<>();
+        int successCount = 0;
+        int failureCount = 0;
+
+        for (RetrievalFuture future : futures) {
+            try {
+                allChunks.addAll(future.future().join());
+                successCount++;
+            } catch (Exception e) {
+                failureCount++;
+                log.error("全局检索 获取检索结果失败 - Collection: {}", future.collection(), e);
+            }
+        }
+
+        // 各库并行返回的子列表仅在自身内部有序，拼接后跨库名次等于拼接顺序，
+        // 会让下游截断与 RRF 的名次基准失真，故在出口统一按 score 降序
+        allChunks.sort((a, b) -> Float.compare(scoreOf(b), scoreOf(a)));
+
+        log.info("全局检索 检索统计 - 总目标数: {}, 成功: {}, 失败: {}, 检索到 Chunk 总数: {}",
+                collections.size(), successCount, failureCount, allChunks.size());
+
+        return allChunks;
+    }
+
+    /**
+     * 单库取数，失败返回空列表兑现「单库失败只损失自己」
+     */
+    private List<RetrievedChunk> retrieveOne(String question, String collectionName, float[] queryVector, int topK) {
         try {
             return retrieverService.retrieveByVector(
                     queryVector,
@@ -54,13 +117,10 @@ public class CollectionParallelRetriever extends AbstractParallelRetriever<Strin
         }
     }
 
-    @Override
-    protected String getTargetIdentifier(String collectionName) {
-        return "Collection: " + collectionName;
-    }
-
-    @Override
-    protected String getStatisticsName() {
-        return "全局检索";
+    /**
+     * 取 chunk 得分，缺失时视为最低分沉底
+     */
+    private static float scoreOf(RetrievedChunk chunk) {
+        return chunk.getScore() == null ? Float.NEGATIVE_INFINITY : chunk.getScore();
     }
 }
