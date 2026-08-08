@@ -359,15 +359,17 @@ public class LightRagClient {
                 if (StrUtil.isBlank(body)) {
                     continue;
                 }
-                // 从 file_path({collectionName}_{docId}) 解析归属 docId，让图谱证据与向量证据在文档层面对齐：
-                // 末端富化据此按 docId 补真实标题，并与同源向量证据聚合进同一文档块
-                String docId = parseDocId(filePath);
+                // 从 file_path 解析归属库与 docId，让图谱证据与向量证据在库 / 文档两个层面对齐：
+                // collection 供下游按库推导意图归属，docId 供末端富化补真实标题并与同源向量证据聚合
+                GraphFileSource source = GraphFileSource.parse(filePath);
+                String docId = source != null ? source.docId() : null;
                 // 分数取按全图名次递减的中性分数 1/(rank+1)：无量纲，仅表达图谱视角下的相对顺序，
                 // 多通道时由 FusionPostProcessor(RRF) 重算，开启 Rerank 时由精排模型覆盖
                 (matched ? chunks : unmatched).add(RetrievedChunk.builder()
                         .id(StrUtil.isNotBlank(refId) ? refId : "graph:" + rank)
                         .text(body)
                         .score(1.0f / (rank + 1))
+                        .collectionName(source != null ? source.collectionName() : null)
                         .docId(docId)
                         // docId 解析到则留空 docName、交富化按 docId 补真实标题；解析不到才回退 file_path 以免完全无来源
                         .docName(docId != null ? null : (StrUtil.isNotBlank(filePath) ? filePath : null))
@@ -400,13 +402,5 @@ public class LightRagClient {
     private boolean matchesCollection(String filePath, Collection<String> collections) {
         GraphFileSource source = GraphFileSource.parse(filePath);
         return source != null && collections.contains(source.collectionName());
-    }
-
-    /**
-     * 从 file_path 解析归属 docId，不符合编码返回 null（仅影响文档聚合与标题富化，不影响召回）
-     */
-    private String parseDocId(String filePath) {
-        GraphFileSource source = GraphFileSource.parse(filePath);
-        return source != null ? source.docId() : null;
     }
 }

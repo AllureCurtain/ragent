@@ -53,6 +53,12 @@ public class RetrievedChunk {
     private Float score;
 
     /**
+     * 所属知识库 collection
+     * 检索时由各后端从存储侧字段填充 用于按库推导意图归属 无库来源（如联网检索）为 null
+     */
+    private String collectionName;
+
+    /**
      * 所属文档 ID
      * 检索后由元数据富化补齐 未富化时为 null
      */

@@ -18,7 +18,6 @@
 package com.nageoffer.ai.ragent.rag.core.vector.strategy;
 
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
-import com.nageoffer.ai.ragent.framework.convention.RetrievedChunkKey;
 import com.nageoffer.ai.ragent.rag.core.intent.IntentNode;
 import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
 import com.nageoffer.ai.ragent.rag.core.retrieval.RetrieveRequest;
@@ -26,7 +25,6 @@ import com.nageoffer.ai.ragent.rag.core.vector.VectorRetrieverService;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,15 +33,7 @@ import java.util.concurrent.Executor;
 @Slf4j
 public class IntentParallelRetriever extends AbstractParallelRetriever<IntentParallelRetriever.IntentTask> {
 
-    public record IntentTask(NodeScore nodeScore, int intentTopK, Set<String> intentIds) {
-
-        public IntentTask {
-            intentIds = Set.copyOf(intentIds);
-        }
-    }
-
-    public record IntentRetrievalResult(List<RetrievedChunk> chunks,
-                                        Map<String, Set<String>> intentIdsByChunkKey) {
+    public record IntentTask(NodeScore nodeScore, int intentTopK) {
     }
 
     public IntentParallelRetriever(VectorRetrieverService retrieverService,
@@ -55,39 +45,20 @@ public class IntentParallelRetriever extends AbstractParallelRetriever<IntentPar
      * 按意图节点并行检索；独立命名用于避免与父类
      * {@code executeParallelRetrieval(String, List, int)} 泛型擦除后的签名冲突
      */
-    public IntentRetrievalResult retrieveByIntents(String question,
-                                                   List<NodeScore> targets,
-                                                   int recallBudget) {
-        ParallelRetrievalResult<IntentTask> result =
-                super.executeParallelRetrievalDetailed(question, buildTasks(targets, recallBudget), recallBudget);
-        return toIntentRetrievalResult(result);
+    public List<RetrievedChunk> retrieveByIntents(String question,
+                                                  List<NodeScore> targets,
+                                                  int recallBudget) {
+        return super.executeParallelRetrieval(question, buildTasks(targets, recallBudget), recallBudget);
     }
 
     /**
      * 按意图节点并行检索，复用调用方已算好的查询向量
      */
-    public IntentRetrievalResult retrieveByIntents(String question,
-                                                   List<NodeScore> targets,
-                                                   int recallBudget,
-                                                   float[] queryVector) {
-        ParallelRetrievalResult<IntentTask> result = super.executeParallelRetrievalDetailed(
-                question, buildTasks(targets, recallBudget), recallBudget, queryVector);
-        return toIntentRetrievalResult(result);
-    }
-
-    private IntentRetrievalResult toIntentRetrievalResult(ParallelRetrievalResult<IntentTask> result) {
-        Map<String, Set<String>> intentIdsByChunkKey = new LinkedHashMap<>();
-        for (TargetRetrievalResult<IntentTask> targetResult : result.targetResults()) {
-            Set<String> intentIds = targetResult.target().intentIds();
-            if (intentIds.isEmpty()) {
-                continue;
-            }
-            for (RetrievedChunk chunk : targetResult.chunks()) {
-                intentIdsByChunkKey.computeIfAbsent(RetrievedChunkKey.of(chunk), ignored -> new LinkedHashSet<>())
-                        .addAll(intentIds);
-            }
-        }
-        return new IntentRetrievalResult(result.chunks(), intentIdsByChunkKey);
+    public List<RetrievedChunk> retrieveByIntents(String question,
+                                                  List<NodeScore> targets,
+                                                  int recallBudget,
+                                                  float[] queryVector) {
+        return super.executeParallelRetrieval(question, buildTasks(targets, recallBudget), recallBudget, queryVector);
     }
 
     @Override
@@ -139,7 +110,7 @@ public class IntentParallelRetriever extends AbstractParallelRetriever<IntentPar
     }
 
     /**
-     * 按 collection 集合和召回深度合并等价查询，并保留全部意图归属
+     * 按 collection 集合和召回深度合并等价查询
      * <p>
      * 问题与查询向量在单次调用中恒定；重复查询会重复计分并虚增通道产能；多 collection 节点仍是一次并集查询，
      * 总共只返回 topK 条；{@link #resolveTotalDepth} 与实际检索共用本方法，使通道产能与真实查询数一致
@@ -151,24 +122,9 @@ public class IntentParallelRetriever extends AbstractParallelRetriever<IntentPar
         for (NodeScore nodeScore : targets) {
             int intentTopK = resolveIntentTopK(nodeScore, recallBudget);
             Set<String> collections = Set.copyOf(collectionsOf(nodeScore));
-            String intentId = intentIdOf(nodeScore);
-            IntentTask task = new IntentTask(
-                    nodeScore, intentTopK, intentId == null ? Set.of() : Set.of(intentId));
-            tasks.merge(new QueryIdentity(collections, intentTopK), task, (existing, duplicate) -> {
-                Set<String> intentIds = new LinkedHashSet<>(existing.intentIds());
-                intentIds.addAll(duplicate.intentIds());
-                return new IntentTask(existing.nodeScore(), existing.intentTopK(), intentIds);
-            });
+            tasks.putIfAbsent(new QueryIdentity(collections, intentTopK), new IntentTask(nodeScore, intentTopK));
         }
         return List.copyOf(tasks.values());
-    }
-
-    private static String intentIdOf(NodeScore nodeScore) {
-        if (nodeScore == null || nodeScore.getNode() == null) {
-            return null;
-        }
-        String intentId = nodeScore.getNode().getId();
-        return intentId == null || intentId.isBlank() ? null : intentId;
     }
 
     private static List<String> collectionsOf(NodeScore nodeScore) {

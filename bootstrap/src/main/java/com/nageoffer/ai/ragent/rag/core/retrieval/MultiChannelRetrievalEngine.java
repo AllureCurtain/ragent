@@ -22,6 +22,8 @@ import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunkKey;
 import com.nageoffer.ai.ragent.framework.trace.RagTraceNode;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
+import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
+import com.nageoffer.ai.ragent.rag.core.retrieval.channel.RetrievalScope;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.RetrievalScopeResolver;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannel;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannelResult;
@@ -85,19 +87,42 @@ public class MultiChannelRetrievalEngine {
         }
 
         List<RetrievedChunk> chunks = executePostProcessors(channelResults, context);
-        Set<String> retainedKeys = chunks.stream()
-                .map(RetrievedChunkKey::of)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
+        return new KnowledgeRetrievalResult(chunks, deriveAttribution(chunks, context.getRetrievalScope()));
+    }
+
+    /**
+     * 按库推导意图归属：定向作用域下，最终存活 chunk 的 collection 属于某命中意图的绑定库即归属该意图
+     * <p>
+     * 归属与证据经由哪条通道到达无关——所有检索共用同一个问题，「哪条查询捞到它」只携带库信息与排名运气；
+     * 同一库被多个意图绑定时全部归属（确定性多归属）。补充路证据的库不在任何命中意图绑定里，天然无归属；
+     * 全局作用域没有命中意图，整体无归属
+     */
+    private Map<String, Set<String>> deriveAttribution(List<RetrievedChunk> chunks, RetrievalScope scope) {
+        if (scope == null || !scope.directed() || chunks.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Set<String>> intentIdsByCollection = new LinkedHashMap<>();
+        for (NodeScore intent : scope.intents()) {
+            String intentId = intent.getNode().getId();
+            if (intentId == null || intentId.isBlank()) {
+                continue;
+            }
+            for (String collection : intent.getNode().getEffectiveCollectionNames()) {
+                intentIdsByCollection
+                        .computeIfAbsent(collection, ignored -> new LinkedHashSet<>())
+                        .add(intentId);
+            }
+        }
         Map<String, Set<String>> intentIdsByChunkKey = new LinkedHashMap<>();
-        channelResults.stream()
-                .map(SearchChannelResult::getIntentIdsByChunkKey)
-                .filter(Objects::nonNull)
-                .flatMap(attribution -> attribution.entrySet().stream())
-                .filter(entry -> retainedKeys.contains(entry.getKey()))
-                .forEach(entry -> intentIdsByChunkKey
-                        .computeIfAbsent(entry.getKey(), ignored -> new LinkedHashSet<>())
-                        .addAll(entry.getValue()));
-        return new KnowledgeRetrievalResult(chunks, intentIdsByChunkKey);
+        for (RetrievedChunk chunk : chunks) {
+            Set<String> intentIds = chunk.getCollectionName() == null
+                    ? null
+                    : intentIdsByCollection.get(chunk.getCollectionName());
+            if (intentIds != null && !intentIds.isEmpty()) {
+                intentIdsByChunkKey.putIfAbsent(RetrievedChunkKey.of(chunk), Set.copyOf(intentIds));
+            }
+        }
+        return intentIdsByChunkKey;
     }
 
     private List<SearchChannelResult> executeSearchChannels(SearchContext context) {

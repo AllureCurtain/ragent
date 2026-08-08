@@ -20,6 +20,9 @@ package com.nageoffer.ai.ragent.rag.core.retrieval;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunkKey;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
+import com.nageoffer.ai.ragent.rag.core.intent.IntentNode;
+import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
+import com.nageoffer.ai.ragent.rag.core.retrieval.channel.RetrievalScope;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.RetrievalScopeResolver;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannel;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannelResult;
@@ -46,58 +49,67 @@ import static org.mockito.Mockito.when;
 class MultiChannelRetrievalEngineTest {
 
     @Test
-    void filtersAttributionByFinalChunksAndKeepsGlobalEvidence() {
-        RetrievedChunk originalA = chunk(null, "A资料", 0.9F);
-        RetrievedChunk chunkA = chunk(null, "A资料", 0.9F);
-        RetrievedChunk discardedA = chunk("discarded", "被淘汰的A资料", 0.8F);
-        RetrievedChunk globalChunk = chunk("global", "全局资料", 0.7F);
+    void derivesAttributionFromFinalChunksByCollection() {
+        // 归属按「chunk 的库 ∈ 意图绑定库」推导，与到达通道无关：关键词证据同样获得归属，
+        // 补充库证据不在任何命中意图绑定里、天然无归属，被后处理淘汰的证据不参与推导
+        RetrievedChunk vectorChunk = chunk("v1", "A资料", "kb-a", 0.9F);
+        RetrievedChunk discarded = chunk("v2", "被淘汰的A资料", "kb-a", 0.8F);
+        RetrievedChunk keywordChunk = chunk("k1", "B资料", "kb-b", 0.7F);
+        RetrievedChunk supplementChunk = chunk("s1", "补充库资料", "kb-c", 0.6F);
 
-        SearchChannel vector = channel(
-                "vector",
-                SearchChannelType.VECTOR,
-                SearchChannelResult.builder()
-                        .channelType(SearchChannelType.VECTOR)
-                        .channelName("vector")
-                        .chunks(List.of(originalA, discardedA))
-                        .intentIdsByChunkKey(Map.of(
-                                RetrievedChunkKey.of(originalA), Set.of("A", "B"),
-                                RetrievedChunkKey.of(discardedA), Set.of("A")))
-                        .build()
-        );
-        SearchChannel keyword = channel(
-                "keyword",
-                SearchChannelType.KEYWORD,
-                SearchChannelResult.builder()
-                        .channelType(SearchChannelType.KEYWORD)
-                        .channelName("keyword")
-                        .chunks(List.of(globalChunk))
-                        .build()
-        );
+        SearchChannel vector = channel("vector", SearchChannelType.VECTOR,
+                channelResult(SearchChannelType.VECTOR, "vector", vectorChunk, discarded));
+        SearchChannel keyword = channel("keyword", SearchChannelType.KEYWORD,
+                channelResult(SearchChannelType.KEYWORD, "keyword", keywordChunk, supplementChunk));
 
         SearchResultPostProcessor finalSelection = mock(SearchResultPostProcessor.class);
         when(finalSelection.getOrder()).thenReturn(1);
         when(finalSelection.isEnabled(any(SearchContext.class))).thenReturn(true);
         when(finalSelection.process(anyList(), anyList(), any(SearchContext.class)))
-                .thenReturn(List.of(globalChunk, chunkA));
+                .thenReturn(List.of(keywordChunk, vectorChunk, supplementChunk));
 
-        KnowledgeRetrievalResult result = new MultiChannelRetrievalEngine(
-                List.of(vector, keyword),
-                List.of(finalSelection),
-                mock(RetrievalScopeResolver.class),
-                Runnable::run,
-                new SearchChannelProperties())
-                .retrieveKnowledgeChannels(
-                        new SubQuestionIntent("问题", List.of()),
-                        RetrievalBudget.uniform(10)
-                );
+        KnowledgeRetrievalResult result = engine(List.of(vector, keyword), List.of(finalSelection),
+                directedScope(List.of(intent("A", "kb-a"), intent("B", "kb-b")),
+                        List.of("kb-a", "kb-b"), List.of("kb-c")))
+                .retrieveKnowledgeChannels(new SubQuestionIntent("问题", List.of()), RetrievalBudget.uniform(10));
         Map<String, List<RetrievedChunk>> grouped = result.groupByIntent("multi_channel");
 
-        assertEquals(List.of(globalChunk, chunkA), result.chunks(), "不得改变最终后处理顺序");
-        assertEquals(List.of(chunkA), grouped.get("A"));
-        assertEquals(List.of(chunkA), grouped.get("B"));
-        assertEquals(List.of(globalChunk), grouped.get("multi_channel"));
+        assertEquals(List.of(keywordChunk, vectorChunk, supplementChunk), result.chunks(), "不得改变最终后处理顺序");
+        assertEquals(List.of(vectorChunk), grouped.get("A"));
+        assertEquals(List.of(keywordChunk), grouped.get("B"), "关键词证据按库获得归属");
+        assertEquals(List.of(supplementChunk), grouped.get("multi_channel"));
         assertEquals(Set.of("A", "B"), result.retrievedIntentIds());
-        assertFalse(result.intentIdsByChunkKey().containsKey(RetrievedChunkKey.of(discardedA)));
+        assertFalse(result.intentIdsByChunkKey().containsKey(RetrievedChunkKey.of(discarded)));
+    }
+
+    @Test
+    void sharedCollectionAttributesAllBoundIntents() {
+        // 多绑定语义定案：同一个库被多个意图绑定 ⇒ 确定性多归属，不挑一个
+        RetrievedChunk sharedChunk = chunk("s1", "共享库资料", "kb-shared", 0.9F);
+        SearchChannel vector = channel("vector", SearchChannelType.VECTOR,
+                channelResult(SearchChannelType.VECTOR, "vector", sharedChunk));
+
+        KnowledgeRetrievalResult result = engine(List.of(vector), List.of(),
+                directedScope(List.of(intent("报销", "kb-shared"), intent("发票", "kb-shared")),
+                        List.of("kb-shared"), List.of()))
+                .retrieveKnowledgeChannels(new SubQuestionIntent("问题", List.of()), RetrievalBudget.uniform(10));
+
+        assertEquals(Set.of("报销", "发票"),
+                result.intentIdsByChunkKey().get(RetrievedChunkKey.of(sharedChunk)));
+    }
+
+    @Test
+    void globalScopeYieldsNoAttribution() {
+        RetrievedChunk globalChunk = chunk("g1", "全局资料", "kb-a", 0.9F);
+        SearchChannel vector = channel("vector", SearchChannelType.VECTOR,
+                channelResult(SearchChannelType.VECTOR, "vector", globalChunk));
+
+        KnowledgeRetrievalResult result = engine(List.of(vector), List.of(),
+                RetrievalScope.global(0.3, List.of("kb-a")))
+                .retrieveKnowledgeChannels(new SubQuestionIntent("问题", List.of()), RetrievalBudget.uniform(10));
+
+        assertTrue(result.intentIdsByChunkKey().isEmpty());
+        assertEquals(List.of(globalChunk), result.groupByIntent("multi_channel").get("multi_channel"));
     }
 
     @Test
@@ -152,6 +164,35 @@ class MultiChannelRetrievalEngineTest {
         }
     }
 
+    private MultiChannelRetrievalEngine engine(List<SearchChannel> channels,
+                                               List<SearchResultPostProcessor> processors,
+                                               RetrievalScope scope) {
+        RetrievalScopeResolver resolver = mock(RetrievalScopeResolver.class);
+        when(resolver.resolve(anyList())).thenReturn(scope);
+        return new MultiChannelRetrievalEngine(
+                channels, processors, resolver, Runnable::run, new SearchChannelProperties());
+    }
+
+    private static RetrievalScope directedScope(List<NodeScore> intents,
+                                                List<String> targets, List<String> supplement) {
+        return new RetrievalScope(true, 0.9, intents, targets, supplement);
+    }
+
+    private static NodeScore intent(String id, String collection) {
+        return NodeScore.builder()
+                .node(IntentNode.builder().id(id).name(id).collectionNames(List.of(collection)).build())
+                .score(0.9)
+                .build();
+    }
+
+    private static SearchChannelResult channelResult(SearchChannelType type, String name, RetrievedChunk... chunks) {
+        return SearchChannelResult.builder()
+                .channelType(type)
+                .channelName(name)
+                .chunks(List.of(chunks))
+                .build();
+    }
+
     private SearchChannel channel(String name, SearchChannelType type, SearchChannelResult result) {
         SearchChannel channel = mock(SearchChannel.class);
         when(channel.getName()).thenReturn(name);
@@ -163,5 +204,9 @@ class MultiChannelRetrievalEngineTest {
 
     private RetrievedChunk chunk(String id, String text, float score) {
         return RetrievedChunk.builder().id(id).text(text).score(score).build();
+    }
+
+    private RetrievedChunk chunk(String id, String text, String collectionName, float score) {
+        return RetrievedChunk.builder().id(id).text(text).collectionName(collectionName).score(score).build();
     }
 }

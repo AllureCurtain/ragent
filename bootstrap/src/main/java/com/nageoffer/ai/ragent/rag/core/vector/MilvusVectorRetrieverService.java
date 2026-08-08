@@ -107,7 +107,7 @@ public class MilvusVectorRetrieverService implements VectorRetrieverService {
                 .data(vectors)
                 .topK(topK)
                 .searchParams(params)
-                .outputFields(List.of("id", "content", "metadata"));
+                .outputFields(List.of("id", "content", "collection_name", "metadata"));
         if (StrUtil.isNotBlank(filter)) {
             builder.filter(filter);
         }
@@ -123,6 +123,7 @@ public class MilvusVectorRetrieverService implements VectorRetrieverService {
                 .map(r -> RetrievedChunk.builder()
                         .id(Objects.toString(r.getEntity().get("id"), ""))
                         .text(Objects.toString(r.getEntity().get("content"), ""))
+                        .collectionName(Objects.toString(r.getEntity().get("collection_name"), null))
                         .score(r.getScore())
                         .build())
                 .collect(Collectors.toList());

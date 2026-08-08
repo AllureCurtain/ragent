@@ -33,7 +33,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -85,12 +84,9 @@ public class VectorSearchChannel implements SearchChannel {
         try {
             RetrievalScope scope = context.getRetrievalScope();
             List<RetrievedChunk> chunks;
-            Map<String, Set<String>> intentIdsByChunkKey = Map.of();
             Map<String, Object> metadata;
             if (scope.directed()) {
-                DirectedRetrieval retrieval = retrieveDirected(context, scope);
-                chunks = retrieval.chunks();
-                intentIdsByChunkKey = retrieval.intentIdsByChunkKey();
+                chunks = retrieveDirected(context, scope);
                 metadata = Map.of("scope", "directed", "topScore", scope.topScore());
             } else {
                 chunks = retrieveGlobal(context, scope);
@@ -102,7 +98,6 @@ public class VectorSearchChannel implements SearchChannel {
                     .channelType(SearchChannelType.VECTOR)
                     .channelName(getName())
                     .chunks(chunks)
-                    .intentIdsByChunkKey(intentIdsByChunkKey)
                     .latencyMs(latency)
                     .metadata(metadata)
                     .build();
@@ -127,7 +122,7 @@ public class VectorSearchChannel implements SearchChannel {
      * 定向作用域：命中意图并行检索，同时并行补一路未命中库
      * 两路共用一次 embedding、同池并发，补充路不增加通道延迟
      */
-    private DirectedRetrieval retrieveDirected(SearchContext context, RetrievalScope scope) {
+    private List<RetrievedChunk> retrieveDirected(SearchContext context, RetrievalScope scope) {
         RetrievalBudget budget = context.getBudget();
         String question = context.getMainQuestion();
         float[] queryVector = retrieverService.embedAndNormalize(question);
@@ -151,9 +146,8 @@ public class VectorSearchChannel implements SearchChannel {
                 })
                 : CompletableFuture.completedFuture(List.of());
 
-        IntentParallelRetriever.IntentRetrievalResult intentResult = intentRetriever.retrieveByIntents(
-                question, scope.intents(), budget.recallBudget(), queryVector);
-        List<RetrievedChunk> directed = distinct(intentResult.chunks());
+        List<RetrievedChunk> directed = distinct(intentRetriever.retrieveByIntents(
+                question, scope.intents(), budget.recallBudget(), queryVector));
         List<RetrievedChunk> supplement = supplementTask.join();
         List<RetrievedChunk> capped = ScopeQuota.cap(directed, quota.primary());
 
@@ -162,9 +156,7 @@ public class VectorSearchChannel implements SearchChannel {
         log.info("向量检索完成（定向），意图 top1={}，定向召回 {} 取前 {} 条（最高余弦 {}），补充 {} 库 {} 条（最高余弦 {}）",
                 scope.topScore(), directed.size(), capped.size(), topScoreOf(directed),
                 scope.supplementCollections().size(), supplement.size(), topScoreOf(supplement));
-        Map<String, Set<String>> attribution = retainAttribution(
-                intentResult.intentIdsByChunkKey(), capped);
-        return new DirectedRetrieval(merge(capped, supplement), attribution);
+        return merge(capped, supplement);
     }
 
     /**
@@ -255,20 +247,6 @@ public class VectorSearchChannel implements SearchChannel {
         return unique.size() == chunks.size() ? chunks : List.copyOf(unique.values());
     }
 
-    private static Map<String, Set<String>> retainAttribution(
-            Map<String, Set<String>> attribution,
-            List<RetrievedChunk> retainedChunks) {
-        Map<String, Set<String>> retained = new LinkedHashMap<>();
-        for (RetrievedChunk chunk : retainedChunks) {
-            String key = RetrievedChunkKey.of(chunk);
-            Set<String> intentIds = attribution.get(key);
-            if (intentIds != null && !intentIds.isEmpty()) {
-                retained.put(key, intentIds);
-            }
-        }
-        return retained;
-    }
-
     /**
      * 合并两路候选并按相关性降序，兑现「通道出口全局有序」这一下游 RRF 依赖的不变式
      */
@@ -298,9 +276,5 @@ public class VectorSearchChannel implements SearchChannel {
 
     private static float scoreOf(RetrievedChunk chunk) {
         return chunk.getScore() == null ? Float.NEGATIVE_INFINITY : chunk.getScore();
-    }
-
-    private record DirectedRetrieval(List<RetrievedChunk> chunks,
-                                     Map<String, Set<String>> intentIdsByChunkKey) {
     }
 }
