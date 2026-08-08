@@ -26,6 +26,7 @@ import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -39,6 +40,7 @@ import java.util.stream.IntStream;
 
 import static com.nageoffer.ai.ragent.rag.constant.RAGConstant.CONTEXT_FORMAT_PATH;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DefaultContextFormatter implements ContextFormatter {
@@ -55,6 +57,10 @@ public class DefaultContextFormatter implements ContextFormatter {
         }
 
         List<NodeScore> retrievedIntents = retrievedIntents(kbIntents, retrievedIntentIds);
+        // 归因链路的出口观测：提示词「没生效」时靠这一行区分是归属为空还是模板/片段本身未配置
+        log.info("检索归因 - 提示词分支: {}, 归属意图: {}",
+                retrievedIntents.isEmpty() ? "无归属" : retrievedIntents.size() > 1 ? "多意图" : "单意图",
+                retrievedIntents.stream().map(ns -> ns.getNode().getName()).toList());
         if (retrievedIntents.isEmpty()) {
             return formatChunksWithoutIntent(rerankedChunks, contextTopK);
         }
