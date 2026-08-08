@@ -85,7 +85,7 @@ public class RetrievalEngine {
         }
 
         // 一次算好检索预算：全 subquestion 共用。最终条数即配置的 default-top-k（启动已校验 >0），是 contextTopK 段唯一真源，
-        // 不再被 max(意图节点 topK) 抬高（node.topK 仍生效，但只管该意图向量召回深度，见 IntentParallelRetriever）
+        // 不再被 max(意图节点 topK) 抬高（node.topK 只覆盖向量定向路的召回深度，见 VectorSearchChannel.resolveDirectedBudget）
         int contextTopK = searchProperties.getDefaultTopK();
         RetrievalBudget budget = new RetrievalBudget(
                 searchProperties.resolveRecallBudget(contextTopK),

@@ -80,19 +80,19 @@ class VectorSearchChannelTest {
     }
 
     @Test
-    @DisplayName("补充路名额恒为通道产出的固定比例，不随意图数与候选池上限漂移")
+    @DisplayName("主补切分只由通道召回额度与比例决定，不随意图数与候选池上限漂移")
     void supplementShareStaysConstantAcrossIntentCountAndCandidateLimit() {
-        // 主路产能 = 意图数 × recallBudget，与候选池上限取小值后切分；
-        // 回归：曾按候选池上限单独切补充路，单意图下补充占比涨到 33%，候选池调至 100 时更达 56%
+        // 定向路收敛为逐库取数后，通道产出额度恒为 recallBudget，与关键词/图谱通道同一口径；
+        // 旧机制产能是意图数 × recallBudget，曾把补充占比从 25% 漂到 56%
         assertSupplementShare(1, 40, 15, 5);
-        assertSupplementShare(2, 40, 30, 10);
-        assertSupplementShare(3, 40, 30, 10);
+        assertSupplementShare(2, 40, 15, 5);
+        assertSupplementShare(3, 40, 15, 5);
         assertSupplementShare(1, 100, 15, 5);
     }
 
     @Test
-    @DisplayName("意图节点自定义 topK 时按其真实产能切分")
-    void customNodeTopKDrivesCapacity() {
+    @DisplayName("意图节点自定义 topK 时覆盖召回深度，且受候选池上限钳制")
+    void customNodeTopKOverridesDepthClampedByCandidateLimit() {
         NodeScore deepIntent = NodeScore.builder()
                 .node(IntentNode.builder()
                         .id("finance")
@@ -107,9 +107,52 @@ class VectorSearchChannelTest {
 
         List<RetrievedChunk> chunks = search(scope, PRODUCTION_BUDGET).getChunks();
 
-        // 产能 100 顶到候选池上限 40，深挖意图不被误砍到 15
+        // 深度 100 顶到候选池上限 40 再切分，深挖意图不被误砍到 15、超池部分也不空转
         assertEquals(30, count(chunks, "dir"));
         assertEquals(10, count(chunks, "sup"));
+    }
+
+    @Test
+    @DisplayName("多意图命中时召回深度取各意图的最大值，缺省者按通道额度参与比较")
+    void multiIntentDepthTakesMaxWithRecallBudgetDefault() {
+        NodeScore shallow = NodeScore.builder()
+                .node(IntentNode.builder()
+                        .id("faq").name("FAQ")
+                        .collectionNames(List.of("kb-faq"))
+                        .topK(5)
+                        .build())
+                .score(0.9)
+                .build();
+        RetrievalScope scope = new RetrievalScope(true, 0.9,
+                List.of(shallow, intent("kb-finance")),
+                List.of("kb-faq", "kb-finance"), SUPPLEMENT);
+
+        List<RetrievedChunk> chunks = search(scope, PRODUCTION_BUDGET).getChunks();
+
+        // max(5, 缺省 20) = 20：一次查询只有一个深度，取大只放宽召回、交给精排收敛
+        assertEquals(15, count(chunks, "dir"));
+        assertEquals(5, count(chunks, "sup"));
+    }
+
+    @Test
+    @DisplayName("单意图 topK 小于通道额度时按绝对深度收窄")
+    void smallNodeTopKNarrowsDepthAbsolutely() {
+        NodeScore shallow = NodeScore.builder()
+                .node(IntentNode.builder()
+                        .id("faq").name("FAQ")
+                        .collectionNames(List.of("kb-faq"))
+                        .topK(5)
+                        .build())
+                .score(0.9)
+                .build();
+        RetrievalScope scope = new RetrievalScope(
+                true, 0.9, List.of(shallow), List.of("kb-faq"), SUPPLEMENT);
+
+        List<RetrievedChunk> chunks = search(scope, PRODUCTION_BUDGET).getChunks();
+
+        // topK 是绝对深度不是下限：小库精配 5 就只召 5，切分后主路 4 补充 1
+        assertEquals(4, count(chunks, "dir"));
+        assertEquals(1, count(chunks, "sup"));
     }
 
     @Test
@@ -164,8 +207,8 @@ class VectorSearchChannelTest {
     @Test
     @DisplayName("不同意图节点绑定同一个库时只发一次查询")
     void intentsOnSameCollectionShareOneQuery() {
-        // 回归：节点级去重拦不住「两个不同节点挂同一个库」，而扇出按节点逐条发查询，
-        // 会白跑一次检索、同一 chunk 在通道原始列表占两个名次被 RRF 双计，并把通道产能算成 40
+        // 查询以库集合为单位、不再按意图扇出：同库多意图在机制上只可能产生一次查询，
+        // 旧机制下这里要靠「查询身份去重」兜住，否则同一 chunk 占两个名次被 RRF 双计
         RetrievalScope scope = new RetrievalScope(true, 0.9,
                 List.of(intent("报销", "kb-finance"), intent("发票", "kb-finance")),
                 List.of("kb-finance"), SUPPLEMENT);
@@ -174,25 +217,26 @@ class VectorSearchChannelTest {
 
         assertEquals(1, captureRequests().stream()
                 .filter(request -> request.getEffectiveCollectionNames().equals(List.of("kb-finance")))
-                .count(), "collection 集合与深度相同的扇出任务必然返回同一份候选，应只发一次");
-        assertEquals(15, count(chunks, "dir"), "真实产能是 20 而非 40，主路应拿 15");
+                .count());
+        assertEquals(15, count(chunks, "dir"));
         assertEquals(5, count(chunks, "sup"));
     }
 
     @Test
     @DisplayName("意图库范围部分重叠时通道出口无重复名次")
     void overlappingIntentCollectionsProduceNoDuplicateRanks() {
-        // 两个节点范围不同、结果却交叠，按查询身份去重拦不住，须在通道出口兜住「一 chunk 一名次」
+        // 两个节点范围部分重叠（[财务,制度] 与 [财务]），主路对命中库并集取数、每库只查一次，
+        // 旧机制按意图各查一次会让交叠 chunk 占两个名次，须在出口 distinct 兜底——该风险已随机制消失
         RetrievalScope scope = new RetrievalScope(true, 0.9,
                 List.of(intent("综合", "kb-finance", "kb-policy"), intent("报销", "kb-finance")),
                 List.of("kb-finance", "kb-policy"), List.of());
 
         List<RetrievedChunk> chunks = search(scope, PRODUCTION_BUDGET).getChunks();
 
-        assertEquals(2, captureRequests().size(), "范围不同是两次真实查询，不该被误合并");
+        assertEquals(1, captureRequests().size(), "并集单查，范围重叠不再产生重复查询");
         assertEquals(chunks.stream().map(RetrievedChunk::getId).distinct().count(), chunks.size(),
                 "同一 chunk 占两个名次会被下游 RRF 按名次累加成双倍分");
-        assertEquals(30, chunks.size(), "两路各 20 条、交叠 10 条，去重后 30 条");
+        assertEquals(20, chunks.size(), "命中库覆盖全部有效库时无补充，主路拿满通道额度");
     }
 
     @Test

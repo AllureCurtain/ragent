@@ -18,19 +18,16 @@
 package com.nageoffer.ai.ragent.rag.core.retrieval.channel;
 
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
-import com.nageoffer.ai.ragent.framework.convention.RetrievedChunkKey;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.core.retrieval.RetrievalBudget;
 import com.nageoffer.ai.ragent.rag.core.retrieval.RetrieveRequest;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorRetrieverService;
 import com.nageoffer.ai.ragent.rag.core.vector.strategy.CollectionParallelRetriever;
-import com.nageoffer.ai.ragent.rag.core.vector.strategy.IntentParallelRetriever;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -52,7 +49,6 @@ public class VectorSearchChannel implements SearchChannel {
 
     private final SearchChannelProperties properties;
     private final VectorRetrieverService retrieverService;
-    private final IntentParallelRetriever intentRetriever;
     private final CollectionParallelRetriever globalRetriever;
     private final Executor retrievalExecutor;
 
@@ -61,7 +57,6 @@ public class VectorSearchChannel implements SearchChannel {
                                Executor innerRetrievalExecutor) {
         this.properties = properties;
         this.retrieverService = retrieverService;
-        this.intentRetriever = new IntentParallelRetriever(retrieverService, innerRetrievalExecutor);
         this.globalRetriever = new CollectionParallelRetriever(retrieverService, innerRetrievalExecutor);
         this.retrievalExecutor = innerRetrievalExecutor;
     }
@@ -119,20 +114,13 @@ public class VectorSearchChannel implements SearchChannel {
     }
 
     /**
-     * 定向作用域：命中意图并行检索，同时并行补一路未命中库
-     * 两路共用一次 embedding、同池并发，补充路不增加通道延迟
+     * 定向作用域：对命中库取主路候选，同时并行补一路未命中库
+     * 定向与全局同一取数原语、只差库集合；两路共用一次 embedding、同池并发，补充路不增加通道延迟
      */
     private List<RetrievedChunk> retrieveDirected(SearchContext context, RetrievalScope scope) {
-        RetrievalBudget budget = context.getBudget();
         String question = context.getMainQuestion();
         float[] queryVector = retrieverService.embedAndNormalize(question);
-
-        // 定向路是每意图各取一份，通道产能为各意图深度之和；与候选池上限取小值作切分基数，
-        // 既让补充路名额真正从主路划出（而非净增），又不产出下游必被截断的空转候选
-        int candidateLimit = budget.candidateLimit();
-        int capacity = intentRetriever.resolveTotalDepth(scope.intents(), budget.recallBudget());
-        int basis = candidateLimit > 0 ? Math.min(candidateLimit, capacity) : capacity;
-        ScopeQuota quota = ScopeQuota.split(scope, basis, supplementRatio());
+        ScopeQuota quota = ScopeQuota.split(scope, resolveDirectedBudget(scope, context.getBudget()), supplementRatio());
 
         // 补充路失败必须只损失自己：它拿到的是兜底名额，而 join() 抛出会让已经取回的定向证据一起被
         // 通道级 catch 丢掉——兜底路把主路带走，鲁棒性方向正好反了
@@ -146,17 +134,31 @@ public class VectorSearchChannel implements SearchChannel {
                 })
                 : CompletableFuture.completedFuture(List.of());
 
-        List<RetrievedChunk> directed = distinct(intentRetriever.retrieveByIntents(
-                question, scope.intents(), budget.recallBudget(), queryVector));
+        List<RetrievedChunk> directed = retrieveOver(question, queryVector, scope.targetCollections(), quota.primary());
         List<RetrievedChunk> supplement = supplementTask.join();
-        List<RetrievedChunk> capped = ScopeQuota.cap(directed, quota.primary());
 
-        // 「召回 N 取前 M」而非「M/N」：主路是先按各意图取满、再跨意图统一排序截断，
-        // 两个数字不等是设计使然（拿到更优的前 M 条），写成分数形式易被误读为召回不足
-        log.info("向量检索完成（定向），意图 top1={}，定向召回 {} 取前 {} 条（最高余弦 {}），补充 {} 库 {} 条（最高余弦 {}）",
-                scope.topScore(), directed.size(), capped.size(), topScoreOf(directed),
+        log.info("向量检索完成（定向），意图 top1={}，命中 {} 库 {} 条（最高余弦 {}），补充 {} 库 {} 条（最高余弦 {}）",
+                scope.topScore(), scope.targetCollections().size(), directed.size(), topScoreOf(directed),
                 scope.supplementCollections().size(), supplement.size(), topScoreOf(supplement));
-        return merge(capped, supplement);
+        return merge(directed, supplement);
+    }
+
+    /**
+     * 定向路的通道产出额度：意图级 node.topK 覆盖每通道默认额度 recallBudget，是绝对深度、可大可小
+     * <p>
+     * 逐库取数后一次查询只有一个深度，多意图命中时取最大值——取大只放宽召回、多出的候选交给精排收敛，
+     * 任何按意图切分配额的方案都是在重造 fan-out。再按候选池上限钳制：超出的部分进不了 Rerank，查了也是空转
+     */
+    private int resolveDirectedBudget(RetrievalScope scope, RetrievalBudget budget) {
+        int depth = scope.intents().stream()
+                .mapToInt(nodeScore -> {
+                    Integer topK = nodeScore.getNode() == null ? null : nodeScore.getNode().getTopK();
+                    return topK != null && topK > 0 ? topK : budget.recallBudget();
+                })
+                .max()
+                .orElse(budget.recallBudget());
+        int candidateLimit = budget.candidateLimit();
+        return candidateLimit > 0 ? Math.min(depth, candidateLimit) : depth;
     }
 
     /**
@@ -228,23 +230,6 @@ public class VectorSearchChannel implements SearchChannel {
 
     private double supplementRatio() {
         return properties.getScope().getSupplementRatio();
-    }
-
-    /**
-     * 兑现「同一 chunk 在通道原始列表里只占一个名次」——下游 RRF 按名次累加，占两个名次即分数翻倍
-     * <p>
-     * 三条 KB 通道里只有定向路需要：意图节点的 collection 集合可以部分重叠（如 A=[财务,人事]、B=[财务]），
-     * 两次扇出的范围不同、结果却交叠，扇出层按查询身份去重拦不住这种情况。
-     * 补充路与主路的库互为差集、关键词与图谱的两份也各自不相交，故无需同等处理
-     * <p>
-     * 入参已按分数降序，保留首次出现即保留名次最高的那份
-     */
-    private static List<RetrievedChunk> distinct(List<RetrievedChunk> chunks) {
-        Map<String, RetrievedChunk> unique = new LinkedHashMap<>();
-        for (RetrievedChunk chunk : chunks) {
-            unique.putIfAbsent(RetrievedChunkKey.of(chunk), chunk);
-        }
-        return unique.size() == chunks.size() ? chunks : List.copyOf(unique.values());
     }
 
     /**
