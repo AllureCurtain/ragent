@@ -82,10 +82,6 @@ rag:
       query-mode: mix  # naive / local / global / hybrid / mix
       timeout-ms: 30000
     embedding-model: qwen-emb-8b  # 与 LightRAG 的 SiliconFlow Qwen3-Embedding-8B 配置一致
-    ingestion:
-      enabled: false           # 写入同步开关：false 冻结图谱写入（向量写不再重建图谱），仅保留可视化 / 检索读取，避免为不检索的图谱持续付出实体抽取成本；true 恢复随向量写自动同步
-      async: true              # 标脏入队 + 后台防抖重建，不阻塞主写链路
-      global-workspace: false  # 跨库方案B（独立全局图）；默认关，Phase1 用 fan-out 兜底
 
   default:
     collection-name: rag_default_store
