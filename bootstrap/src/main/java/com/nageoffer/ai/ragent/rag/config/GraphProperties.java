@@ -74,13 +74,10 @@ public class GraphProperties {
         private String apiKey = "";
 
         /**
-         * 查询模式：naive / local / global / hybrid / mix
+         * LightRAG 检索算法（naive / local / global / hybrid / mix），透传 /query 的 mode 字段
+         * mix 在图谱证据外混入 LightRAG 内部向量检索的 chunk：与向量通道内容重复但 id 不同，RRF 去不掉重；
+         * hybrid 只回图结构关联的证据，与向量 / 关键词通道正交；naive 完全不走图，本架构下不建议
          */
-        private String queryMode = "mix";
-
-        /**
-         * 请求超时（毫秒）
-         */
-        private int timeoutMs = 30000;
+        private String queryMode = "hybrid";
     }
 }

@@ -66,12 +66,18 @@ public class RetrievalScopeResolver {
             return RetrievalScope.global(topScore, activeCollections);
         }
 
-        Set<String> targets = new LinkedHashSet<>(NodeScoreFilters.kbCollections(kbIntents));
-        // 意图绑定与知识库表是两套数据，删库不回写意图节点。绑定的库全部失效时若照常收窄，
-        // 主路名额会全部打在空库上、补充路只剩 25%，而每条查询都「成功」返回 0 条，没有任何报错
-        if (activeCollections.stream().noneMatch(targets::contains)) {
-            log.warn("KB 意图绑定的知识库均已失效（{}），检索退化为全局作用域", targets);
+        Set<String> bound = new LinkedHashSet<>(NodeScoreFilters.kbCollections(kbIntents));
+        // 意图绑定与知识库表是两套数据，删库不回写意图节点：悬空库名对向量 / ES 只是查空库，
+        // 图谱却会按库名匹配到已删库的图谱残留，故绑定集先与有效库求交
+        Set<String> targets = new LinkedHashSet<>(bound);
+        targets.retainAll(activeCollections);
+        if (targets.isEmpty()) {
+            log.warn("KB 意图绑定的知识库均已失效（{}），检索退化为全局作用域", bound);
             return RetrievalScope.global(topScore, activeCollections);
+        }
+        if (targets.size() < bound.size()) {
+            bound.removeAll(targets);
+            log.warn("KB 意图绑定中已失效的知识库（{}）不参与检索", bound);
         }
         List<String> supplement = activeCollections.stream()
                 .filter(collection -> !targets.contains(collection))

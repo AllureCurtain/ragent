@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.config.GraphProperties;
+import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
@@ -36,11 +37,13 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LightRagClientTest {
 
     private MockWebServer server;
     private LightRagClient client;
+    private SearchChannelProperties searchProperties;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
@@ -49,7 +52,8 @@ class LightRagClientTest {
         server.start();
         GraphProperties properties = new GraphProperties();
         properties.getLightrag().setBaseUrl(server.url("/").toString());
-        client = new LightRagClient(new OkHttpClient(), objectMapper, properties);
+        searchProperties = new SearchChannelProperties();
+        client = new LightRagClient(new OkHttpClient(), objectMapper, properties, searchProperties);
     }
 
     @AfterEach
@@ -98,6 +102,49 @@ class LightRagClientTest {
         assertEquals(List.of("r1"), ids(evidence.matched()));
         assertEquals(List.of("r0"), ids(evidence.unmatched()));
         assertEquals("1954071234567890100", evidence.matched().get(0).getDocId());
+    }
+
+    @Test
+    @DisplayName("过滤生效时 references 缺失的兜底上下文被丢弃而非无主入池")
+    void fallbackContextIsDroppedWhenFilteringByCollection() {
+        // 兜底块无 file_path、无法归属，放行等于绕过有效库过滤
+        server.enqueue(json("{\"response\":\"整段上下文\"}"));
+
+        GraphEvidence evidence = client.retrieveByScope("报销流程", "mix", 10, List.of("kb"));
+
+        assertTrue(evidence.matched().isEmpty());
+        assertTrue(evidence.unmatched().isEmpty());
+    }
+
+    @Test
+    @DisplayName("删除链路不受检索通道预算限制")
+    void deletionIsNotBoundByChannelBudget() throws Exception {
+        // 回归：检索预算若污染删除链路，大库文档枚举超预算会中断删除，静默留下图谱残留
+        searchProperties.getChannels().setTimeoutMs(200);
+        server.enqueue(json("""
+                {"statuses":{"processed":[
+                  {"id":"doc-kb","file_path":"kb_1954071234567890100"}
+                ]}}
+                """).setBodyDelay(1, TimeUnit.SECONDS));
+        server.enqueue(json("{}"));
+
+        client.deleteByCollection("kb");
+
+        server.takeRequest(2, TimeUnit.SECONDS);
+        RecordedRequest deleteRequest = server.takeRequest(2, TimeUnit.SECONDS);
+        assertNotNull(deleteRequest, "删除请求应照常发出，不被 200ms 检索预算掐断");
+        assertEquals(List.of("doc-kb"), docIdsOf(deleteRequest));
+    }
+
+    @Test
+    @DisplayName("客户端超时取通道级预算，超限调用降级为空证据")
+    void clientTimeoutFollowsChannelBudget() {
+        searchProperties.getChannels().setTimeoutMs(200);
+        server.enqueue(json("{\"response\":\"ctx\"}").setBodyDelay(1, TimeUnit.SECONDS));
+
+        GraphEvidence evidence = client.retrieveByScope("报销流程", "mix", 10, List.of());
+
+        assertTrue(evidence.matched().isEmpty());
     }
 
     private MockResponse json(String body) {

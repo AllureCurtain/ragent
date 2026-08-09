@@ -37,7 +37,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -99,9 +101,10 @@ class GraphSearchChannelTest {
     }
 
     @Test
-    @DisplayName("全局作用域下不切分，全图证据全部归入主份")
-    void globalScopeKeepsAllEvidenceInPrimary() {
-        stub(evidences("m", 0, 30), List.of());
+    @DisplayName("全局作用域把全部有效库下发给结果侧过滤，无主证据不入池")
+    void globalScopePassesActiveCollectionsForFiltering() {
+        // 回归：全局曾传空集=不过滤，已删库在图上的残留会被当证据返回
+        stub(evidences("m", 0, 30), evidences("u", 30, 2));
 
         SearchContext context = SearchContext.builder()
                 .originalQuestion("报销发票贴哪张表？")
@@ -110,8 +113,19 @@ class GraphSearchChannelTest {
                 .build();
         List<RetrievedChunk> chunks = channel.search(context).getChunks();
 
-        assertEquals(20, chunks.size(), "无补充份时名额全归主份");
-        assertTrue(chunks.stream().allMatch(chunk -> chunk.getId().startsWith("m")));
+        verify(lightRagClient).retrieveByScope(anyString(), any(), eq(20), eq(List.of("kb-finance", "kb-hr")));
+        assertEquals(20, chunks.size(), "全局无补充名额，名额全归主份且请求量不上浮");
+        assertEquals(0, count(chunks, "u"), "过滤出的无主证据（已删库残留 / 解析失败）在全局下被丢弃");
+    }
+
+    @Test
+    @DisplayName("定向作用域按上浮倍数放大请求量，补回被过滤筛掉的跨库证据")
+    void directedScopeBoostsRequestTopK() {
+        stub(List.of(), List.of());
+
+        channel.search(directedContext());
+
+        verify(lightRagClient).retrieveByScope(anyString(), any(), eq(60), eq(List.of("kb-finance")));
     }
 
     @Test

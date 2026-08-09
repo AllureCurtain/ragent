@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.config.GraphProperties;
+import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -59,13 +60,16 @@ public class LightRagClient {
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final GraphProperties properties;
+    private final SearchChannelProperties searchProperties;
 
     public LightRagClient(@Qualifier("syncHttpClient") OkHttpClient httpClient,
                           ObjectMapper objectMapper,
-                          GraphProperties properties) {
+                          GraphProperties properties,
+                          SearchChannelProperties searchProperties) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.searchProperties = searchProperties;
     }
 
     /**
@@ -94,7 +98,7 @@ public class LightRagClient {
             if (topK > 0) {
                 body.put("top_k", topK);
             }
-            JsonNode root = post("/query", body);
+            JsonNode root = postQuery(body);
             return root != null ? parseReferences(root, collections) : GraphEvidence.empty();
         } catch (Exception e) {
             log.warn("LightRAG 检索失败，降级为空结果: {}", e.getMessage());
@@ -271,6 +275,20 @@ public class LightRagClient {
         }
     }
 
+    /**
+     * /query 专用：超时取通道级预算 rag.search.channels.timeout-ms，通道放弃结果后客户端没有理由继续等
+     * <=0 不另设；只有检索走此路，写入 / 删除 / 可视化沿用基础 client 默认超时，不受检索预算影响
+     */
+    private JsonNode postQuery(JsonNode body) throws Exception {
+        long timeoutMs = searchProperties.getChannels().getTimeoutMs();
+        OkHttpClient client = timeoutMs <= 0 ? httpClient : httpClient.newBuilder()
+                .callTimeout(Duration.ofMillis(timeoutMs))
+                .readTimeout(Duration.ofMillis(timeoutMs))
+                .build();
+        return execute(auth(new Request.Builder().url(url("/query"))
+                .post(RequestBody.create(objectMapper.writeValueAsString(body), JSON))), "/query", client);
+    }
+
     private JsonNode post(String path, JsonNode body) throws Exception {
         return execute(auth(new Request.Builder().url(url(path))
                 .post(RequestBody.create(objectMapper.writeValueAsString(body), JSON))), path);
@@ -301,14 +319,13 @@ public class LightRagClient {
     }
 
     /**
-     * 统一执行：按超时新建 client，非 2xx / 空响应返回 null，异常向上抛由调用方降级
+     * 统一执行：非 2xx / 空响应返回 null，异常向上抛由调用方降级
      */
     private JsonNode execute(Request.Builder builder, String path) throws Exception {
-        int timeoutMs = Math.max(1000, properties.getLightrag().getTimeoutMs());
-        OkHttpClient client = httpClient.newBuilder()
-                .callTimeout(Duration.ofMillis(timeoutMs))
-                .readTimeout(Duration.ofMillis(timeoutMs))
-                .build();
+        return execute(builder, path, httpClient);
+    }
+
+    private JsonNode execute(Request.Builder builder, String path, OkHttpClient client) throws Exception {
         try (Response response = client.newCall(builder.build()).execute()) {
             if (!response.isSuccessful()) {
                 log.warn("LightRAG 请求失败 path={}, code={}", path, response.code());
@@ -378,11 +395,13 @@ public class LightRagClient {
             }
             return new GraphEvidence(chunks, unmatched);
         }
-        // 回退：references 关闭或为空时，用 response 上下文兜底为单个证据块
-        // 切分生效时该兜底块无 file_path、无法归属，跳过以免破坏作用域语义
-        if (!filterByCollection) {
-            String context = root.path("response").asText("");
-            if (StrUtil.isNotBlank(context)) {
+        // 回退：references 缺失时把 response 上下文兜底为单个证据块
+        // 兜底块无 file_path、无法归属，过滤生效时丢弃；告警是因为这通常意味着服务端不支持 references
+        String context = root.path("response").asText("");
+        if (StrUtil.isNotBlank(context)) {
+            if (filterByCollection) {
+                log.warn("LightRAG 未返回 references，兜底上下文无法按库归属已丢弃，请检查服务端版本与 include_references 支持");
+            } else {
                 chunks.add(RetrievedChunk.builder()
                         .id("graph:context")
                         .text(context)

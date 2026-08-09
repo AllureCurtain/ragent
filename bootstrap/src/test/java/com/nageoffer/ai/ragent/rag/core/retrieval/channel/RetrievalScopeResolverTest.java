@@ -98,6 +98,19 @@ class RetrievalScopeResolverTest {
     }
 
     @Test
+    @DisplayName("意图绑定中已失效的库被剔除出检索范围，剩余有效库照常收窄")
+    void retiredBindingIsDroppedFromDirectedScope() {
+        // 回归：悬空库名会让图谱在结果侧按库名匹配到已删库的残留证据
+        RetrievalScope scope = resolve(intent("kb-finance", 0.9), intent("kb-retired", 0.8));
+
+        assertTrue(scope.directed());
+        assertEquals(List.of("kb-finance"), scope.targetCollections());
+        assertEquals(List.of("kb-hr", "kb-tech"), scope.supplementCollections());
+        assertEquals(Set.of("intent-kb-finance", "intent-kb-retired"), scope.directedIntentIds(),
+                "悬空意图保留在定向意图集里，由下游按「定向未命中」处理，而非伪装成从未识别");
+    }
+
+    @Test
     @DisplayName("命中库覆盖全部有效库时补充范围为空")
     void fullCoverageLeavesNoSupplement() {
         RetrievalScope scope = resolve(

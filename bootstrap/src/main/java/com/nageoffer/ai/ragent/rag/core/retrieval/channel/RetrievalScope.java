@@ -32,7 +32,7 @@ import java.util.Set;
  * @param directed              是否收窄到命中库
  * @param topScore              KB 意图最高分，仅用于观测与阈值校准
  * @param intents               命中的 KB 意图，定向时非空
- * @param targetCollections     主检索范围：定向为命中库，全局为全部有效库
+ * @param targetCollections     主检索范围：定向为命中且有效的库（绑定集与知识库表求交），全局为全部有效库
  * @param supplementCollections 补充检索范围：全部有效库减去命中库，全局作用域下恒为空
  */
 public record RetrievalScope(boolean directed,
