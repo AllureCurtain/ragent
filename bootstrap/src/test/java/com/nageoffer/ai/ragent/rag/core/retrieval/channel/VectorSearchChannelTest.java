@@ -192,8 +192,10 @@ class VectorSearchChannelTest {
     }
 
     @Test
-    @DisplayName("全局作用域下单次跨全部有效库检索")
+    @DisplayName("全局作用域下单次跨全部有效库检索，取数深度与其他通道同源")
     void globalScopeQueriesAllCollectionsOnce() {
+        // 全局路取数只受 recallBudget 管：候选池上限是 RRF 之后的闸门而非取数目标，
+        // 拿它当取数条数会让「调 Rerank 池」顺带改写向量库查询深度，一份配置两个职责
         RetrievalScope scope = RetrievalScope.global(0.3, List.of("kb-finance", "kb-hr", "kb-tech"));
 
         search(scope, PRODUCTION_BUDGET);
@@ -201,7 +203,7 @@ class VectorSearchChannelTest {
         List<RetrieveRequest> requests = captureRequests();
         assertEquals(1, requests.size());
         assertEquals(List.of("kb-finance", "kb-hr", "kb-tech"), requests.get(0).getEffectiveCollectionNames());
-        assertEquals(40, requests.get(0).getTopK());
+        assertEquals(20, requests.get(0).getTopK());
     }
 
     @Test
@@ -250,18 +252,6 @@ class VectorSearchChannelTest {
 
         assertEquals(5, count(chunks, "sup"), "补充路名额是总量，不随补充库数放大");
         assertEquals(15, count(chunks, "dir"));
-    }
-
-    @Test
-    @DisplayName("候选池上限关闭时全局路回退到通道召回额度")
-    void globalScopeFallsBackToRecallBudgetWhenCandidateLimitDisabled() {
-        // 回归：候选池上限 <=0 是融合阶段「不截断」的语义，原样当取数上限就成了 LIMIT 0、一条都召不回
-        RetrievalScope scope = RetrievalScope.global(0.3, List.of("kb-finance", "kb-hr"));
-
-        List<RetrievedChunk> chunks = search(scope, new RetrievalBudget(20, 0, 10)).getChunks();
-
-        assertEquals(20, captureRequests().get(0).getTopK());
-        assertEquals(20, chunks.size());
     }
 
     @Test

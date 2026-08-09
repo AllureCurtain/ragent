@@ -44,16 +44,6 @@ class SearchChannelPropertiesTest {
     }
 
     @Test
-    @DisplayName("candidateBudget 默认取绝对值，=0 时回退传入的 Rerank 候选池上限")
-    void resolveCandidateBudget() {
-        SearchChannelProperties.Vector vector = new SearchChannelProperties.Vector();
-        assertEquals(40, vector.resolveCandidateBudget(40), "默认 candidate-budget=0 应跟随候选池上限");
-
-        vector.setCandidateBudget(80);
-        assertEquals(80, vector.resolveCandidateBudget(40), "显式 candidate-budget 应优先");
-    }
-
-    @Test
     @DisplayName("默认配置满足漏斗不变式，启动不抛异常")
     void defaultConfigPassesInvariant() {
         assertDoesNotThrow(() -> new SearchChannelProperties().afterPropertiesSet());
@@ -92,19 +82,6 @@ class SearchChannelPropertiesTest {
 
         props.getScope().setMinIntentScore(RAGConstant.INTENT_MIN_SCORE);
         assertDoesNotThrow(props::afterPropertiesSet, "等于下限时该配置仍有意义，不应拦截");
-    }
-
-    @Test
-    @DisplayName("candidateBudget < contextTopK 破坏不变式，启动即抛")
-    void candidateBudgetBelowContextTopKThrows() {
-        // 全局作用域的取数上限是第四段预算，此前不在漏斗校验内：配成 3 则全局路最多召回 3 条，
-        // 而 default-top-k 承诺 10 条，且只有低置信问题才会暴露症状
-        SearchChannelProperties props = new SearchChannelProperties();
-        props.getChannels().getVector().setCandidateBudget(3);
-        assertThrows(IllegalStateException.class, props::afterPropertiesSet);
-
-        props.getChannels().getVector().setCandidateBudget(0);
-        assertDoesNotThrow(props::afterPropertiesSet, "0 表示跟随候选池上限，不是越界值");
     }
 
     @Test

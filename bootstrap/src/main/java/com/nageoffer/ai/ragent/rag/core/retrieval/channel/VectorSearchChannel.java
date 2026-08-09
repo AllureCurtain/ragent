@@ -156,6 +156,7 @@ public class VectorSearchChannel implements SearchChannel {
 
     /**
      * 全局作用域：跨全部有效库检索
+     * 取数深度与其他通道同源、只受 recallBudget 管——候选池上限是 RRF 之后的闸门而非取数目标
      */
     private List<RetrievedChunk> retrieveGlobal(SearchContext context, RetrievalScope scope) {
         if (scope.targetCollections().isEmpty()) {
@@ -164,7 +165,7 @@ public class VectorSearchChannel implements SearchChannel {
         }
         String question = context.getMainQuestion();
         List<RetrievedChunk> chunks = retrieveOver(question, retrieverService.embedAndNormalize(question),
-                scope.targetCollections(), globalFetchSize(context.getBudget()));
+                scope.targetCollections(), context.getBudget().recallBudget());
 
         log.info("向量检索完成（全局），意图 top1={}，{} 库 {} 条（最高余弦 {}）",
                 scope.topScore(), scope.targetCollections().size(), chunks.size(), ChunkRanking.topScoreOf(chunks));
@@ -193,18 +194,6 @@ public class VectorSearchChannel implements SearchChannel {
                 .build())
                 : globalRetriever.executeParallelRetrieval(question, collections, budget, queryVector);
         return ScopeQuota.cap(ChunkRanking.sortedByScore(chunks), budget);
-    }
-
-    /**
-     * 全局路一次取数的条数上限
-     * <p>
-     * 候选池上限 <=0 是融合阶段「不截断」的语义，原样拿来当取数上限就成了 LIMIT 0、一条都召不回，
-     * 与配置意图正好相反，故先回退到通道召回额度，保证传给后端的上限恒为正
-     */
-    private int globalFetchSize(RetrievalBudget budget) {
-        int candidateLimit = budget.candidateLimit();
-        return properties.getChannels().getVector()
-                .resolveCandidateBudget(candidateLimit > 0 ? candidateLimit : budget.recallBudget());
     }
 
     private double supplementRatio() {

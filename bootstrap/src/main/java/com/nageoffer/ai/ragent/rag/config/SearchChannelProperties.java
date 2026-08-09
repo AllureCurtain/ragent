@@ -96,13 +96,6 @@ public class SearchChannelProperties implements InitializingBean {
                             + "请调大 rag.search.fusion.rerank-candidate-limit 或调小 rag.search.default-top-k",
                     candidateLimit, contextTopK));
         }
-        int candidateBudget = channels.getVector().getCandidateBudget();
-        if (candidateBudget > 0 && candidateBudget < contextTopK) {
-            throw new IllegalStateException(String.format(
-                    "检索预算漏斗不变式被破坏：candidateBudget(%d) < contextTopK(%d)，全局作用域的取数上限不得小于最终条数，"
-                            + "请调大 rag.search.channels.vector.candidate-budget 或调小 rag.search.default-top-k",
-                    candidateBudget, contextTopK));
-        }
         if (scope.getMinIntentScore() < RAGConstant.INTENT_MIN_SCORE) {
             throw new IllegalStateException(String.format(
                     "rag.search.scope.min-intent-score(%s) 低于上游意图过滤下限 INTENT_MIN_SCORE(%s)，该配置不会产生任何效果，"
@@ -199,22 +192,6 @@ public class SearchChannelProperties implements InitializingBean {
          * 一条向量通道一个总开关；关闭即全站无向量召回
          */
         private boolean enabled = true;
-
-        /**
-         * 全局作用域候选预算
-         * 向量通道自有的取数旋钮：全库检索时这一路的总条数上限（fan-out 兜底路径下每库各取此值、再统一截断到此值）
-         * <=0 时回退到 Rerank 候选池上限 rerankCandidateLimit：召回超过候选池上限的部分下游必被截断、属空转，
-         * 故默认让它跟随候选池上限（单一真源）；确需更宽的跨库广度时填正值独立覆盖
-         */
-        private int candidateBudget = 0;
-
-        /**
-         * 解析全局作用域候选预算
-         * 优先使用绝对预算 candidateBudget；未配置（<=0）时回退到传入的 Rerank 候选池上限
-         */
-        public int resolveCandidateBudget(int candidateLimitFallback) {
-            return candidateBudget > 0 ? candidateBudget : candidateLimitFallback;
-        }
     }
 
     @Data
