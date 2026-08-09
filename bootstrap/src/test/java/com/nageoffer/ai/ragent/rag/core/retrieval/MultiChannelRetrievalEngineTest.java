@@ -81,6 +81,7 @@ class MultiChannelRetrievalEngineTest {
         assertEquals(List.of(keywordChunk), grouped.get("B"), "关键词证据按库获得归属");
         assertEquals(List.of(supplementChunk), grouped.get("multi_channel"));
         assertEquals(Set.of("A", "B"), result.retrievedIntentIds());
+        assertEquals(Set.of("A", "B"), result.directedIntentIds());
         assertFalse(result.intentIdsByChunkKey().containsKey(RetrievedChunkKey.of(discarded)));
     }
 
@@ -98,6 +99,7 @@ class MultiChannelRetrievalEngineTest {
 
         assertEquals(Set.of("报销", "发票"),
                 result.intentIdsByChunkKey().get(RetrievedChunkKey.of(sharedChunk)));
+        assertEquals(Set.of("报销", "发票"), result.directedIntentIds());
     }
 
     @Test
@@ -111,13 +113,14 @@ class MultiChannelRetrievalEngineTest {
                 .retrieveKnowledgeChannels(new SubQuestionIntent("问题", List.of()), RetrievalBudget.uniform(10));
 
         assertTrue(result.intentIdsByChunkKey().isEmpty());
+        assertTrue(result.directedIntentIds().isEmpty());
         assertEquals(List.of(globalChunk), result.groupByIntent("multi_channel").get("multi_channel"));
     }
 
     @Test
-    void slowChannelDegradesToEmptyAfterChannelTimeout() {
+    void directedTimeoutKeepsScopeAndDegradesToMiss() {
         // 慢通道模拟卡死的后端：超时只丢它自己的结果，不钳制同一子问题里其余通道
-        RetrievedChunk fastChunk = chunk("fast", "快通道资料", 0.9F);
+        RetrievedChunk fastChunk = chunk("fast", "补充库资料", "kb-supplement", 0.9F);
         SearchChannel fast = channel(
                 "vector",
                 SearchChannelType.VECTOR,
@@ -145,6 +148,10 @@ class MultiChannelRetrievalEngineTest {
 
         SearchChannelProperties properties = new SearchChannelProperties();
         properties.getChannels().setTimeoutMs(200);
+        RetrievalScopeResolver resolver = mock(RetrievalScopeResolver.class);
+        NodeScore candidate = intent("A", "kb-a");
+        when(resolver.resolve(anyList())).thenReturn(directedScope(
+                List.of(candidate), List.of("kb-a"), List.of("kb-supplement")));
 
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
@@ -152,7 +159,7 @@ class MultiChannelRetrievalEngineTest {
             KnowledgeRetrievalResult result = new MultiChannelRetrievalEngine(
                     List.of(fast, slow),
                     List.of(),
-                    mock(RetrievalScopeResolver.class),
+                    resolver,
                     pool,
                     properties)
                     .retrieveKnowledgeChannels(
@@ -163,6 +170,9 @@ class MultiChannelRetrievalEngineTest {
 
             assertEquals(List.of("fast"), result.chunks().stream().map(RetrievedChunk::getId).toList(),
                     "慢通道超时按空结果降级，快通道证据保留");
+            assertEquals(Set.of("A"), result.directedIntentIds());
+            assertTrue(result.retrievedIntentIds().isEmpty());
+            assertTrue(result.eligibleIntentIds(List.of(candidate)).isEmpty());
             assertTrue(elapsedMs < 800, "慢通道不得钳制整次检索，实际耗时 " + elapsedMs + "ms");
             verify(slow).emptyResult(0L);
         } finally {
