@@ -20,57 +20,32 @@ package com.nageoffer.ai.ragent.rag.controller.vo;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
-import lombok.Getter;
-import lombok.Setter;
 
 import java.util.List;
 import java.util.Map;
 
 /**
- * 系统设置视图对象
- * 包含RAG和AI相关的配置信息
+ * 系统设置视图对象，只读汇总运行中配置
+ * 分组：引擎档位 / 后端选型 / RAG 检索管线 / AI 模型，密钥一律脱敏或省略
  */
-@Setter
-@Getter
+@Data
+@Builder
 public class SystemSettingsVO {
 
+    private EngineSettings engine;
+    private BackendSettings backends;
     private RagSettings rag;
     private AISettings ai;
     private UploadSettings upload;
 
-    public SystemSettingsVO(RagSettings rag, AISettings ai, UploadSettings upload) {
-        this.rag = rag;
-        this.ai = ai;
-        this.upload = upload;
-    }
+    @Data
+    @Builder
+    public static class EngineSettings {
 
-    public static SystemSettingsVOBuilder builder() {
-        return new SystemSettingsVOBuilder();
-    }
-
-    public static class SystemSettingsVOBuilder {
-        private RagSettings rag;
-        private AISettings ai;
-        private UploadSettings upload;
-
-        public SystemSettingsVOBuilder rag(RagSettings rag) {
-            this.rag = rag;
-            return this;
-        }
-
-        public SystemSettingsVOBuilder ai(AISettings ai) {
-            this.ai = ai;
-            return this;
-        }
-
-        public SystemSettingsVOBuilder upload(UploadSettings upload) {
-            this.upload = upload;
-            return this;
-        }
-
-        public SystemSettingsVO build() {
-            return new SystemSettingsVO(rag, ai, upload);
-        }
+        /**
+         * 执行架构档位：workflow（编排管线）/ agent（ReAct 架构）
+         */
+        private String type;
     }
 
     @Data
@@ -80,6 +55,189 @@ public class SystemSettingsVO {
         private Long maxRequestSize;
     }
 
+    /**
+     * 后端组件选型，对应 yaml 里 rag.storage/vector/keyword/graph 四个 type 开关
+     */
+    @Data
+    @Builder
+    public static class BackendSettings {
+        private StorageBackend storage;
+        private VectorBackend vector;
+        private KeywordBackend keyword;
+        private GraphBackend graph;
+
+        @Data
+        @Builder
+        public static class StorageBackend {
+
+            /**
+             * s3（rustfs / minio）/ oss（阿里云），连接信息取当前生效后端的值
+             */
+            private String type;
+            private String kbBucket;
+            private String assetBucket;
+            private String endpoint;
+            private String publicUrl;
+            private String region;
+        }
+
+        @Data
+        @Builder
+        public static class VectorBackend {
+
+            /**
+             * pg / milvus
+             */
+            private String type;
+        }
+
+        @Data
+        @Builder
+        public static class KeywordBackend {
+
+            /**
+             * none / es，es 连接信息仅 type=es 时有意义
+             */
+            private String type;
+            private String uris;
+            private String index;
+            private String analyzer;
+            private String searchAnalyzer;
+        }
+
+        @Data
+        @Builder
+        public static class GraphBackend {
+
+            /**
+             * none / lightrag
+             */
+            private String type;
+            private String baseUrl;
+            private String queryMode;
+            private String embeddingModel;
+        }
+    }
+
+    @Data
+    @Builder
+    public static class RagSettings {
+
+        @JsonProperty("default")
+        private DefaultSettings defaultConfig;
+        private FeatureSettings features;
+        private SearchSettings search;
+        private RateLimitSettings rateLimit;
+        private MemorySettings memory;
+    }
+
+    @Data
+    @Builder
+    public static class DefaultSettings {
+        private String collectionName;
+        private Integer dimension;
+        private String metricType;
+        private Long sseTimeoutMs;
+    }
+
+    /**
+     * RAG 功能开关合集
+     */
+    @Data
+    @Builder
+    public static class FeatureSettings {
+        private Boolean queryRewrite;
+        private Boolean rerank;
+        private Boolean citation;
+        private Boolean contextEnrich;
+        private Boolean trace;
+    }
+
+    /**
+     * 检索漏斗配置：recallBudget → rerankCandidateLimit → defaultTopK 单调收窄
+     */
+    @Data
+    @Builder
+    public static class SearchSettings {
+        private Integer defaultTopK;
+        private Integer recallBudget;
+        private ScopeSettings scope;
+        private ChannelSettings channels;
+        private FusionSettings fusion;
+
+        @Data
+        @Builder
+        public static class ScopeSettings {
+            private Double minIntentScore;
+            private Double confidenceThreshold;
+            private Double supplementRatio;
+        }
+
+        @Data
+        @Builder
+        public static class ChannelSettings {
+            private Long timeoutMs;
+            private Channel vector;
+            private Channel keyword;
+            private Channel graph;
+            private WebSearchChannel webSearch;
+        }
+
+        /**
+         * 权重在 yaml 里配置于 fusion.channel-weights 下，展示上归属各通道
+         */
+        @Data
+        @Builder
+        public static class Channel {
+            private Boolean enabled;
+            private Double weight;
+        }
+
+        @Data
+        @Builder
+        public static class WebSearchChannel {
+            private Boolean enabled;
+            private Double weight;
+            private Integer count;
+            private Integer timeoutSeconds;
+            private Boolean apiKeyConfigured;
+        }
+
+        @Data
+        @Builder
+        public static class FusionSettings {
+            private String strategy;
+            private Integer rrfK;
+            private Integer rerankCandidateLimit;
+        }
+    }
+
+    @Data
+    @Builder
+    public static class MemorySettings {
+        private Integer historyKeepTurns;
+        private Boolean summaryEnabled;
+        private Integer summaryStartTurns;
+        private Integer summaryMaxChars;
+        private Integer titleMaxLength;
+    }
+
+    @Data
+    @Builder
+    public static class RateLimitSettings {
+        private GlobalRateLimit global;
+    }
+
+    @Data
+    @Builder
+    public static class GlobalRateLimit {
+        private Boolean enabled;
+        private Integer maxConcurrent;
+        private Integer maxWaitSeconds;
+        private Integer leaseSeconds;
+        private Integer pollIntervalMs;
+    }
+
     @Data
     @Builder
     public static class AISettings {
@@ -87,6 +245,7 @@ public class SystemSettingsVO {
         private ModelGroup chat;
         private ModelGroup embedding;
         private ModelGroup rerank;
+        private ModelGroup vlm;
         private Selection selection;
         private Stream stream;
 
@@ -101,10 +260,12 @@ public class SystemSettingsVO {
         @Data
         @Builder
         public static class ModelGroup {
-            // defaultModel 供 embedding/rerank/vlm 使用；chat 组走档位（tiers）字段
+
+            /**
+             * defaultModel 供 embedding/rerank/vlm 使用；chat 组走档位（tiers）字段
+             */
             private String defaultModel;
             private List<ModelCandidate> candidates;
-            // 以下为 chat 组档位机制字段，embedding/rerank/vlm 为 null
             private String defaultTier;
             private String deepThinkingTier;
             private Map<String, TierConfig> tiers;
@@ -141,191 +302,6 @@ public class SystemSettingsVO {
         @Builder
         public static class Stream {
             private Integer messageChunkSize;
-        }
-    }
-
-    @Data
-    @Builder
-    public static class DefaultSettings {
-        private String collectionName;
-        private Integer dimension;
-        private String metricType;
-    }
-
-    @Data
-    @Builder
-    public static class MemorySettings {
-        private Integer historyKeepTurns;
-        private Boolean summaryEnabled;
-        private Integer summaryStartTurns;
-        private Integer summaryMaxChars;
-        private Integer titleMaxLength;
-    }
-
-    @Setter
-    @Getter
-    public static class RagSettings {
-        @JsonProperty("default")
-        private DefaultSettings defaultConfig;
-        private QueryRewriteSettings queryRewrite;
-        private RateLimitSettings rateLimit;
-        private MemorySettings memory;
-
-        public RagSettings(DefaultSettings defaultConfig, QueryRewriteSettings queryRewrite,
-                           RateLimitSettings rateLimit, MemorySettings memory) {
-            this.defaultConfig = defaultConfig;
-            this.queryRewrite = queryRewrite;
-            this.rateLimit = rateLimit;
-            this.memory = memory;
-        }
-
-        public static RagSettingsBuilder builder() {
-            return new RagSettingsBuilder();
-        }
-
-        public static class RagSettingsBuilder {
-            private DefaultSettings defaultConfig;
-            private QueryRewriteSettings queryRewrite;
-            private RateLimitSettings rateLimit;
-            private MemorySettings memory;
-
-            public RagSettingsBuilder defaultConfig(DefaultSettings defaultConfig) {
-                this.defaultConfig = defaultConfig;
-                return this;
-            }
-
-            public RagSettingsBuilder queryRewrite(QueryRewriteSettings queryRewrite) {
-                this.queryRewrite = queryRewrite;
-                return this;
-            }
-
-            public RagSettingsBuilder rateLimit(RateLimitSettings rateLimit) {
-                this.rateLimit = rateLimit;
-                return this;
-            }
-
-            public RagSettingsBuilder memory(MemorySettings memory) {
-                this.memory = memory;
-                return this;
-            }
-
-            public RagSettings build() {
-                return new RagSettings(defaultConfig, queryRewrite, rateLimit, memory);
-            }
-        }
-    }
-
-    @Setter
-    @Getter
-    public static class QueryRewriteSettings {
-        private Boolean enabled;
-
-        public QueryRewriteSettings(Boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public static QueryRewriteSettingsBuilder builder() {
-            return new QueryRewriteSettingsBuilder();
-        }
-
-        public static class QueryRewriteSettingsBuilder {
-            private Boolean enabled;
-
-            public QueryRewriteSettingsBuilder enabled(Boolean enabled) {
-                this.enabled = enabled;
-                return this;
-            }
-
-            public QueryRewriteSettings build() {
-                return new QueryRewriteSettings(enabled);
-            }
-        }
-    }
-
-    @Setter
-    @Getter
-    public static class RateLimitSettings {
-        private GlobalRateLimit global;
-
-        public RateLimitSettings(GlobalRateLimit global) {
-            this.global = global;
-        }
-
-        public static RateLimitSettingsBuilder builder() {
-            return new RateLimitSettingsBuilder();
-        }
-
-        public static class RateLimitSettingsBuilder {
-            private GlobalRateLimit global;
-
-            public RateLimitSettingsBuilder global(GlobalRateLimit global) {
-                this.global = global;
-                return this;
-            }
-
-            public RateLimitSettings build() {
-                return new RateLimitSettings(global);
-            }
-        }
-    }
-
-    @Setter
-    @Getter
-    public static class GlobalRateLimit {
-        private Boolean enabled;
-        private Integer maxConcurrent;
-        private Integer maxWaitSeconds;
-        private Integer leaseSeconds;
-        private Integer pollIntervalMs;
-
-        public GlobalRateLimit(Boolean enabled, Integer maxConcurrent, Integer maxWaitSeconds,
-                               Integer leaseSeconds, Integer pollIntervalMs) {
-            this.enabled = enabled;
-            this.maxConcurrent = maxConcurrent;
-            this.maxWaitSeconds = maxWaitSeconds;
-            this.leaseSeconds = leaseSeconds;
-            this.pollIntervalMs = pollIntervalMs;
-        }
-
-        public static GlobalRateLimitBuilder builder() {
-            return new GlobalRateLimitBuilder();
-        }
-
-        public static class GlobalRateLimitBuilder {
-            private Boolean enabled;
-            private Integer maxConcurrent;
-            private Integer maxWaitSeconds;
-            private Integer leaseSeconds;
-            private Integer pollIntervalMs;
-
-            public GlobalRateLimitBuilder enabled(Boolean enabled) {
-                this.enabled = enabled;
-                return this;
-            }
-
-            public GlobalRateLimitBuilder maxConcurrent(Integer maxConcurrent) {
-                this.maxConcurrent = maxConcurrent;
-                return this;
-            }
-
-            public GlobalRateLimitBuilder maxWaitSeconds(Integer maxWaitSeconds) {
-                this.maxWaitSeconds = maxWaitSeconds;
-                return this;
-            }
-
-            public GlobalRateLimitBuilder leaseSeconds(Integer leaseSeconds) {
-                this.leaseSeconds = leaseSeconds;
-                return this;
-            }
-
-            public GlobalRateLimitBuilder pollIntervalMs(Integer pollIntervalMs) {
-                this.pollIntervalMs = pollIntervalMs;
-                return this;
-            }
-
-            public GlobalRateLimit build() {
-                return new GlobalRateLimit(enabled, maxConcurrent, maxWaitSeconds, leaseSeconds, pollIntervalMs);
-            }
         }
     }
 }
