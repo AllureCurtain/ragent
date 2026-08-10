@@ -48,7 +48,7 @@ KB_SPECS: list[dict[str, str]] = [
     },
 ]
 
-EMBEDDING_MODEL = "qwen-emb-8b"
+EMBEDDING_MODEL = "bailian-text-embedding-v4"
 
 OUTPUT_PATH = Path(__file__).resolve().parent / "kb_ids.json"
 
@@ -62,7 +62,8 @@ def http_json(
 ) -> dict[str, Any]:
     """发起 JSON 请求，返回反序列化后的响应体。"""
     data = json.dumps(body).encode("utf-8") if body is not None else None
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    headers = {"Content-Type": "application/json", "Accept": "application/json",
+               "User-Agent": "ragenteval-init/1.0"}
     if token:
         headers["Authorization"] = token
     req = urllib.request.Request(url, data=data, method=method, headers=headers)

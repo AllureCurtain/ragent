@@ -103,6 +103,7 @@ def login(base_url: str, username: str, password: str) -> str:
     resp = requests.post(
         f"{base_url}/auth/login",
         json={"username": username, "password": password},
+        headers={"User-Agent": "ragenteval-init/1.0"},
         timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
@@ -240,7 +241,8 @@ def create_node(base_url: str, token: str, payload: dict[str, Any]) -> str:
     resp = requests.post(
         f"{base_url}/intent-tree",
         json=payload,
-        headers={"Authorization": token, "Content-Type": "application/json"},
+        headers={"Authorization": token, "Content-Type": "application/json",
+                 "User-Agent": "ragenteval-init/1.0"},
         timeout=REQUEST_TIMEOUT,
     )
     if resp.status_code != 200:

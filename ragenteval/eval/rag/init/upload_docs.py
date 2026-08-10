@@ -56,11 +56,15 @@ CHUNK_CONFIG = json.dumps(
 
 REQUEST_TIMEOUT = 30
 
+# 走 Cloudflare 代理时需要一个非默认 UA，否则会被 Browser Integrity Check 拦 (Error 1010)。
+DEFAULT_HEADERS = {"User-Agent": "ragenteval-init/1.0"}
+
 
 def login(base_url: str, username: str, password: str) -> str:
     resp = requests.post(
         f"{base_url}/auth/login",
         json={"username": username, "password": password},
+        headers=DEFAULT_HEADERS,
         timeout=REQUEST_TIMEOUT,
     )
     resp.raise_for_status()
@@ -88,7 +92,7 @@ def upload_one(
             "chunkStrategy": CHUNK_STRATEGY,
             "chunkConfig": CHUNK_CONFIG,
         }
-        headers = {"Authorization": token}
+        headers = {"Authorization": token, **DEFAULT_HEADERS}
         resp = requests.post(
             f"{base_url}/knowledge-base/{kb_id}/docs/upload",
             files=files,
@@ -111,7 +115,7 @@ def upload_one(
 def trigger_chunk(base_url: str, token: str, doc_id: str) -> None:
     resp = requests.post(
         f"{base_url}/knowledge-base/docs/{doc_id}/chunk",
-        headers={"Authorization": token},
+        headers={"Authorization": token, **DEFAULT_HEADERS},
         timeout=REQUEST_TIMEOUT,
     )
     if resp.status_code != 200:
