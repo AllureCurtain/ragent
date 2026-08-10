@@ -114,12 +114,59 @@ SELECT vector_dims(embedding) FROM t_knowledge_vector WHERE embedding IS NOT NUL
 The configured embedding dimension is 1536. Existing vectors with another dimension require a
 planned reindex; do not alter the column or discard vectors during deployment.
 
-## 6. Upgrade and rollback
+## 6. CI/CD (GitHub Actions → GHCR → cloud host)
 
-Use immutable image tags in real deployments (`RAGENT_IMAGE_TAG` can be a Git commit). Before an
-upgrade, back up PostgreSQL and the two RustFS buckets. Build the new tag, start it, run smoke tests,
-then switch the host proxy if needed. Rollback means restoring the prior image tag and configuration;
-do not run `docker compose down -v`, because that removes optional Redis/RocketMQ volumes.
+After the first manual bring-up, day-to-day releases are automated:
+
+```text
+git push origin main
+  → GitHub Actions builds backend / mcp-server / web images
+  → pushes to ghcr.io/allurecurtain/ragent-*
+  → SSH to the cloud host, pull images, compose up -d
+```
+
+### 6.1 One-time GitHub Secrets
+
+Repository → Settings → Secrets and variables → Actions:
+
+| Secret | Example | Purpose |
+| --- | --- | --- |
+| `DEPLOY_HOST` | `82.156.116.18` | Cloud server IP/DNS |
+| `DEPLOY_USER` | `root` | SSH user |
+| `DEPLOY_SSH_KEY` | ed25519 private key | Deploy key (password auth is not used) |
+| `DEPLOY_PORT` | `22` | Optional, defaults to 22 |
+
+Image pull during deploy reuses `GITHUB_TOKEN` (packages:write). No extra GHCR token is required.
+
+Install the matching public key into the server `~/.ssh/authorized_keys` once.
+
+### 6.2 Image coordinates
+
+CI writes these into the host `.env` on every rollout:
+
+```dotenv
+RAGENT_IMAGE_TAG=<git-sha7>
+RAGENT_BACKEND_IMAGE=ghcr.io/allurecurtain/ragent-backend
+RAGENT_MCP_IMAGE=ghcr.io/allurecurtain/ragent-mcp-server
+RAGENT_WEB_IMAGE=ghcr.io/allurecurtain/ragent-web
+```
+
+Host path is fixed at `/opt/ragent/deploy/cloud`. Secrets and model keys stay only in that host `.env`.
+
+### 6.3 Manual / skip-deploy runs
+
+- Actions → **Deploy Cloud** → Run workflow
+- Set `skip_deploy=true` to only build/push images
+
+Remote entrypoint: `deploy/cloud/scripts/remote-rollout.sh`.
+
+### 6.4 Upgrade and rollback
+
+Use immutable image tags in real deployments (`RAGENT_IMAGE_TAG` is a Git short SHA). Before an
+upgrade that includes schema changes, apply `resources/database/upgrades/...` SQL and back up
+PostgreSQL plus the two RustFS buckets. Rollback means restoring the prior image tag in `.env` and
+`docker compose up -d --no-build`; do not run `docker compose down -v`, because that removes optional
+Redis volumes.
 
 ## 7. Public-demo cautions
 

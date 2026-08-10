@@ -1,0 +1,161 @@
+name: Deploy Cloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_deploy:
+        description: "Only build and push images (skip SSH deploy)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy-cloud-main
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # GHCR requires lowercase owner/name
+  IMAGE_OWNER: allurecurtain
+  IMAGE_PREFIX: ragent
+  DEPLOY_DIR: /opt/ragent/deploy/cloud
+
+jobs:
+  build-and-push:
+    name: Build and push images
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      backend_image: ${{ steps.meta.outputs.backend_image }}
+      mcp_image: ${{ steps.meta.outputs.mcp_image }}
+      web_image: ${{ steps.meta.outputs.web_image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$(git rev-parse --short=7 HEAD)"
+          BACKEND="${REGISTRY}/${IMAGE_OWNER}/${IMAGE_PREFIX}-backend"
+          MCP="${REGISTRY}/${IMAGE_OWNER}/${IMAGE_PREFIX}-mcp-server"
+          WEB="${REGISTRY}/${IMAGE_OWNER}/${IMAGE_PREFIX}-web"
+          {
+            echo "image_tag=${TAG}"
+            echo "backend_image=${BACKEND}"
+            echo "mcp_image=${MCP}"
+            echo "web_image=${WEB}"
+          } >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"
+          echo "backend=${BACKEND}:${TAG}"
+          echo "mcp=${MCP}:${TAG}"
+          echo "web=${WEB}:${TAG}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/cloud/Dockerfile
+          target: backend
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.backend_image }}:${{ steps.meta.outputs.image_tag }}
+            ${{ steps.meta.outputs.backend_image }}:main
+          cache-from: type=gha,scope=ragent-backend
+          cache-to: type=gha,mode=max,scope=ragent-backend
+
+      - name: Build and push mcp-server
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/cloud/Dockerfile
+          target: mcp-server
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.mcp_image }}:${{ steps.meta.outputs.image_tag }}
+            ${{ steps.meta.outputs.mcp_image }}:main
+          cache-from: type=gha,scope=ragent-mcp
+          cache-to: type=gha,mode=max,scope=ragent-mcp
+
+      - name: Build and push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/cloud/frontend.Dockerfile
+          push: true
+          build-args: |
+            VITE_API_BASE_URL=/api/ragent
+          tags: |
+            ${{ steps.meta.outputs.web_image }}:${{ steps.meta.outputs.image_tag }}
+            ${{ steps.meta.outputs.web_image }}:main
+          cache-from: type=gha,scope=ragent-web
+          cache-to: type=gha,mode=max,scope=ragent-web
+
+  deploy:
+    name: Deploy to cloud server
+    needs: build-and-push
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.skip_deploy == 'false') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout deploy assets
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            deploy/cloud
+          sparse-checkout-cone-mode: true
+
+      - name: Upload compose and scripts
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          source: "deploy/cloud/compose.yaml,deploy/cloud/compose.infra.yaml,deploy/cloud/logback-cloud.xml,deploy/cloud/nginx/*,deploy/cloud/scripts/remote-rollout.sh"
+          target: "/opt/ragent/"
+          strip_components: 0
+          overwrite: true
+
+      - name: Roll out new images
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          BACKEND_IMAGE: ${{ needs.build-and-push.outputs.backend_image }}
+          MCP_IMAGE: ${{ needs.build-and-push.outputs.mcp_image }}
+          WEB_IMAGE: ${{ needs.build-and-push.outputs.web_image }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script_stop: true
+          command_timeout: 25m
+          envs: IMAGE_TAG,BACKEND_IMAGE,MCP_IMAGE,WEB_IMAGE,GHCR_USER,GHCR_TOKEN
+          script: |
+            set -euo pipefail
+            chmod +x /opt/ragent/deploy/cloud/scripts/remote-rollout.sh
+            export DEPLOY_DIR=/opt/ragent/deploy/cloud
+            # Fallback user for GHCR login when secret not set
+            export GHCR_USER="${GHCR_USER:-allurecurtain}"
+            bash /opt/ragent/deploy/cloud/scripts/remote-rollout.sh
