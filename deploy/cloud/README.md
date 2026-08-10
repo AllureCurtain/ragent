@@ -23,6 +23,29 @@ sudo sysctl -p /etc/sysctl.d/99-ragent-redis.conf
 The schema scripts are not run automatically. Never rerun `resources/database/schema_pg.sql` against
 an existing database without first checking the schema and taking a backup.
 
+### GHCR pull needs a local proxy (mihomo)
+
+This host is in mainland China; Docker Hub and ghcr.io pulls are slow or stall when connecting
+directly. The host runs mihomo (Clash Meta) as a local mixed proxy on `127.0.0.1:7891`. Configure
+the Docker daemon to use it so image pulls work:
+
+```bash
+cat > /etc/systemd/system/docker.service.d/proxy.conf <<'EOF'
+[Service]
+Environment="HTTP_PROXY=http://127.0.0.1:7891"
+Environment="HTTPS_PROXY=http://127.0.0.1:7891"
+Environment="NO_PROXY=localhost,127.0.0.1,*.local,.internal"
+EOF
+systemctl daemon-reload && systemctl restart docker
+
+# keep the proxy alive across reboots
+systemctl enable --now mihomo
+```
+
+The old `~/.docker/config.json` proxies entry (host.docker.internal:7891) is a Docker Desktop
+artifact and is unreachable on Linux; it only affects `docker build`/`run` network, not daemon pulls,
+and should be removed. Container runtime networking stays direct thanks to the compose-level
+`x-direct-network-environment` anchor, so application traffic never goes through the proxy.
 ## 2. Join the existing infrastructure
 
 Create one internal network for PostgreSQL, RustFS, and the managed Redis:
