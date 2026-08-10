@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Download } from "lucide-react";
 
 import { MarkdownRenderer } from "@/components/chat/MarkdownRenderer";
-import {
+export {
   isImageType,
   isSpreadsheetType,
   parseFrontMatter
