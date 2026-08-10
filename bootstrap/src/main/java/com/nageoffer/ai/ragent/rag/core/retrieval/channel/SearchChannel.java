@@ -17,6 +17,8 @@
 
 package com.nageoffer.ai.ragent.rag.core.retrieval.channel;
 
+import java.util.List;
+
 /**
  * 检索通道接口
  * <p>
@@ -54,4 +56,17 @@ public interface SearchChannel {
      * 通道类型
      */
     SearchChannelType getType();
+
+    /**
+     * 空结果交卷：检索失败或无数据时的降级形态，只带通道身份与耗时
+     * 引擎的超时降级与各通道的异常兜底共用，保证空结果的形状全站一致
+     */
+    default SearchChannelResult emptyResult(long latencyMs) {
+        return SearchChannelResult.builder()
+                .channelType(getType())
+                .channelName(getName())
+                .chunks(List.of())
+                .latencyMs(latencyMs)
+                .build();
+    }
 }

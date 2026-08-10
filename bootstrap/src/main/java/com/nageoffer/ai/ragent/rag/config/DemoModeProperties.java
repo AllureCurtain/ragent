@@ -26,7 +26,7 @@ import org.springframework.context.annotation.Configuration;
  */
 @Data
 @Configuration
-@ConfigurationProperties(prefix = "app")
+@ConfigurationProperties(prefix = "ragent")
 public class DemoModeProperties {
 
     /**

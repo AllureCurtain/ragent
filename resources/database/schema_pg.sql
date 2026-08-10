@@ -390,6 +390,42 @@ CREATE TABLE t_rag_trace_node (
 COMMENT ON TABLE t_rag_trace_node IS 'Trace 节点记录表';
 
 -- ============================================
+-- Agent Profile Tables
+-- ============================================
+
+CREATE TABLE t_agent_profile (
+    id          VARCHAR(20)  NOT NULL PRIMARY KEY,
+    name        VARCHAR(64)  NOT NULL,
+    description VARCHAR(512),
+    avatar      VARCHAR(32),
+    builtin     SMALLINT     NOT NULL DEFAULT 0,
+    active      SMALLINT     NOT NULL DEFAULT 0,
+    create_by   VARCHAR(20),
+    update_by   VARCHAR(20),
+    create_time TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted     SMALLINT     NOT NULL DEFAULT 0,
+    CONSTRAINT uk_agent_name UNIQUE (name)
+);
+CREATE INDEX idx_agent_active ON t_agent_profile (active);
+COMMENT ON TABLE t_agent_profile IS '智能体人设配置表';
+
+CREATE TABLE t_agent_prompt (
+    id          VARCHAR(20)  NOT NULL PRIMARY KEY,
+    agent_id    VARCHAR(20)  NOT NULL,
+    slot_key    VARCHAR(64)  NOT NULL,
+    content     TEXT,
+    create_by   VARCHAR(20),
+    update_by   VARCHAR(20),
+    create_time TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted     SMALLINT     NOT NULL DEFAULT 0,
+    CONSTRAINT uk_agent_slot UNIQUE (agent_id, slot_key)
+);
+CREATE INDEX idx_agent_prompt_agent ON t_agent_prompt (agent_id);
+COMMENT ON TABLE t_agent_prompt IS '智能体提示词槽位表';
+
+-- ============================================
 -- Ingestion Pipeline Tables
 -- ============================================
 
@@ -785,3 +821,27 @@ COMMENT ON COLUMN t_ingestion_task_node.output_json IS '节点输出JSON(全量)
 COMMENT ON COLUMN t_ingestion_task_node.create_time IS '创建时间';
 COMMENT ON COLUMN t_ingestion_task_node.update_time IS '更新时间';
 COMMENT ON COLUMN t_ingestion_task_node.deleted IS '是否删除 0：正常 1：删除';
+
+-- t_agent_profile
+COMMENT ON COLUMN t_agent_profile.id IS '主键ID';
+COMMENT ON COLUMN t_agent_profile.name IS '智能体名称，唯一';
+COMMENT ON COLUMN t_agent_profile.description IS '智能体描述';
+COMMENT ON COLUMN t_agent_profile.avatar IS '头像预设标识，取值由前端预设表定义，认不出时按 id 哈希兜底';
+COMMENT ON COLUMN t_agent_profile.builtin IS '是否内置 0：否 1：是。内置智能体不可编辑不可删除，是所有空槽位的回落终点';
+COMMENT ON COLUMN t_agent_profile.active IS '是否激活 0：否 1：是。全局仅允许一条为 1';
+COMMENT ON COLUMN t_agent_profile.create_by IS '创建人';
+COMMENT ON COLUMN t_agent_profile.update_by IS '更新人';
+COMMENT ON COLUMN t_agent_profile.create_time IS '创建时间';
+COMMENT ON COLUMN t_agent_profile.update_time IS '更新时间';
+COMMENT ON COLUMN t_agent_profile.deleted IS '是否删除 0：正常 1：删除';
+
+-- t_agent_prompt
+COMMENT ON COLUMN t_agent_prompt.id IS '主键ID';
+COMMENT ON COLUMN t_agent_prompt.agent_id IS '所属智能体ID';
+COMMENT ON COLUMN t_agent_prompt.slot_key IS '槽位标识，见 AgentPromptSlot 枚举';
+COMMENT ON COLUMN t_agent_prompt.content IS '提示词全文，空白视为未配置并回落内置智能体';
+COMMENT ON COLUMN t_agent_prompt.create_by IS '创建人';
+COMMENT ON COLUMN t_agent_prompt.update_by IS '更新人';
+COMMENT ON COLUMN t_agent_prompt.create_time IS '创建时间';
+COMMENT ON COLUMN t_agent_prompt.update_time IS '更新时间';
+COMMENT ON COLUMN t_agent_prompt.deleted IS '是否删除 0：正常 1：删除';

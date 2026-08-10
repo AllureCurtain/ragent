@@ -22,6 +22,8 @@ import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import com.nageoffer.ai.ragent.infra.enums.Tier;
 import com.nageoffer.ai.ragent.rag.config.MemoryProperties;
+import com.nageoffer.ai.ragent.rag.core.prompt.AgentPromptResolver;
+import com.nageoffer.ai.ragent.rag.core.prompt.AgentPromptSlot;
 import com.nageoffer.ai.ragent.rag.core.prompt.PromptTemplateLoader;
 import com.nageoffer.ai.ragent.rag.dao.entity.ConversationMessageDO;
 import com.nageoffer.ai.ragent.rag.dao.entity.ConversationSummaryDO;
@@ -68,6 +70,9 @@ class JdbcConversationMemorySummaryServiceTest {
     private PromptTemplateLoader promptTemplateLoader;
 
     @Mock
+    private AgentPromptResolver agentPromptResolver;
+
+    @Mock
     private RedissonClient redissonClient;
 
     @Mock
@@ -90,6 +95,7 @@ class JdbcConversationMemorySummaryServiceTest {
                 memoryProperties,
                 llmService,
                 promptTemplateLoader,
+                agentPromptResolver,
                 redissonClient,
                 directExecutor
         );
@@ -97,6 +103,9 @@ class JdbcConversationMemorySummaryServiceTest {
         when(redissonClient.getLock(anyString())).thenReturn(lock);
         when(lock.tryLock()).thenReturn(true);
         when(lock.isHeldByCurrentThread()).thenReturn(true);
+        // promptTemplateLoader 仅 decorateIfNeeded 路径使用，当前用例不覆盖该路径；
+        // 安全桩防止将来加用例时静默取到 null
+        when(promptTemplateLoader.renderSection(anyString(), anyString(), anyMap())).thenReturn("wrapped summary");
     }
 
     @Test
@@ -163,7 +172,7 @@ class JdbcConversationMemorySummaryServiceTest {
     }
 
     private void stubSummaryGeneration() {
-        when(promptTemplateLoader.render(anyString(), anyMap())).thenReturn("summary prompt");
+        when(agentPromptResolver.render(eq(AgentPromptSlot.CONVERSATION_SUMMARY), anyMap())).thenReturn("summary prompt");
         when(llmService.chat(any(ChatRequest.class), eq(Tier.FAST))).thenReturn("updated summary");
     }
 

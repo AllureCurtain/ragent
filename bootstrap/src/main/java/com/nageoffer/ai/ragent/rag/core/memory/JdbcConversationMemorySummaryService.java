@@ -25,6 +25,8 @@ import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import com.nageoffer.ai.ragent.infra.enums.Tier;
 import com.nageoffer.ai.ragent.rag.config.MemoryProperties;
+import com.nageoffer.ai.ragent.rag.core.prompt.AgentPromptResolver;
+import com.nageoffer.ai.ragent.rag.core.prompt.AgentPromptSlot;
 import com.nageoffer.ai.ragent.rag.core.prompt.PromptTemplateLoader;
 import com.nageoffer.ai.ragent.rag.dao.entity.ConversationMessageDO;
 import com.nageoffer.ai.ragent.rag.dao.entity.ConversationSummaryDO;
@@ -47,7 +49,6 @@ import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 import static com.nageoffer.ai.ragent.rag.constant.RAGConstant.CONTEXT_FORMAT_PATH;
-import static com.nageoffer.ai.ragent.rag.constant.RAGConstant.CONVERSATION_SUMMARY_PROMPT_PATH;
 
 @Slf4j
 @Service
@@ -61,6 +62,7 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
     private final MemoryProperties memoryProperties;
     private final LLMService llmService;
     private final PromptTemplateLoader promptTemplateLoader;
+    private final AgentPromptResolver agentPromptResolver;
     private final RedissonClient redissonClient;
     private final Executor memorySummaryExecutor;
 
@@ -184,8 +186,8 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
 
         int summaryMaxChars = memoryProperties.getSummaryMaxChars();
         List<ChatMessage> summaryMessages = new ArrayList<>();
-        String summaryPrompt = promptTemplateLoader.render(
-                CONVERSATION_SUMMARY_PROMPT_PATH,
+        String summaryPrompt = agentPromptResolver.render(
+                AgentPromptSlot.CONVERSATION_SUMMARY,
                 Map.of("summary_max_chars", String.valueOf(summaryMaxChars))
         );
         summaryMessages.add(ChatMessage.system(summaryPrompt));

@@ -18,6 +18,7 @@
 package com.nageoffer.ai.ragent.rag.core.retrieval.postprocessor;
 
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
+import com.nageoffer.ai.ragent.framework.convention.RetrievedChunkKey;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannelResult;
 import com.nageoffer.ai.ragent.rag.core.retrieval.channel.SearchChannelType;
@@ -104,7 +105,7 @@ public class FusionPostProcessor implements SearchResultPostProcessor {
             double weight = weightOf(result.getChannelType());
             List<RetrievedChunk> channelChunks = result.getChunks();
             for (int rank = 0; rank < channelChunks.size(); rank++) {
-                String key = chunkKey(channelChunks.get(rank));
+                String key = RetrievedChunkKey.of(channelChunks.get(rank));
                 double delta = weight / (k + rank + 1);
                 rrfScores.merge(key, delta, Double::sum);
             }
@@ -112,7 +113,7 @@ public class FusionPostProcessor implements SearchResultPostProcessor {
 
         List<RetrievedChunk> fused = new ArrayList<>(chunks);
         for (RetrievedChunk chunk : fused) {
-            Double score = rrfScores.get(chunkKey(chunk));
+            Double score = rrfScores.get(RetrievedChunkKey.of(chunk));
             chunk.setScore(score != null ? score.floatValue() : 0f);
         }
         fused.sort((a, b) -> Float.compare(b.getScore(), a.getScore()));
@@ -134,21 +135,15 @@ public class FusionPostProcessor implements SearchResultPostProcessor {
                 channelCount, properties.getFusion().getRrfK(), ranked.size(),
                 limit > 0 ? String.valueOf(limit) : "不限", candidates.size());
 
-        // 归因日志：送入 Rerank 的候选按来源通道分布，便于观测各通道（尤其新接入的图谱）实际贡献了多少候选
+        // 截断是弱势通道证据消失的第一现场：池内与出池分布并排打，某通道被整体截没时在此可见，
+        // 下游 Rerank 的存活率日志看到的输入已经是 0
         if (channelCount > 1) {
             Map<String, Set<SearchChannelType>> index = ChannelAttribution.index(results);
-            log.info("检索归因 - 送入 Rerank 候选按通道: {}",
+            log.info("检索归因 - 融合池按通道: {}, 送入 Rerank 按通道: {}",
+                    ChannelAttribution.format(ChannelAttribution.countByChannel(ranked, index)),
                     ChannelAttribution.format(ChannelAttribution.countByChannel(candidates, index)));
         }
         return candidates;
-    }
-
-    /**
-     * 生成 Chunk 融合键 复用统一的归因键规则（优先 id，缺失时退化为文本 SHA-256），
-     * 保证融合累分与归因反查用的是同一套 key
-     */
-    private String chunkKey(RetrievedChunk chunk) {
-        return ChannelAttribution.keyOf(chunk);
     }
 
     /**

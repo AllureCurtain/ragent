@@ -29,7 +29,7 @@ import org.springframework.stereotype.Component;
  */
 @Data
 @Component
-@ConfigurationProperties(prefix = "app.eval")
+@ConfigurationProperties(prefix = "ragent.eval")
 public class EvalProperties {
 
     /**

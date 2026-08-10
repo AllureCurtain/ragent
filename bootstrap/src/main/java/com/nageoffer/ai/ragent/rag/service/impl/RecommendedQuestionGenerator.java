@@ -27,7 +27,8 @@ import com.nageoffer.ai.ragent.framework.convention.GroundingChunk;
 import com.nageoffer.ai.ragent.framework.trace.RagTraceNode;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import com.nageoffer.ai.ragent.infra.enums.Tier;
-import com.nageoffer.ai.ragent.rag.core.prompt.PromptTemplateLoader;
+import com.nageoffer.ai.ragent.rag.core.prompt.AgentPromptResolver;
+import com.nageoffer.ai.ragent.rag.core.prompt.AgentPromptSlot;
 import com.nageoffer.ai.ragent.rag.dto.RecommendedQuestionsPayload;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,8 +38,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-
-import static com.nageoffer.ai.ragent.rag.constant.RAGConstant.RECOMMENDED_QUESTIONS_PROMPT_PATH;
 
 /**
  * 推荐追问问题生成器
@@ -58,7 +57,7 @@ public class RecommendedQuestionGenerator {
     private static final int MAX_OUTPUT_TOKENS = 256;
     private static final int MAX_QUESTION_ITEM_CHARS = 200;
 
-    private final PromptTemplateLoader promptTemplateLoader;
+    private final AgentPromptResolver agentPromptResolver;
     private final LLMService llmService;
 
     @RagTraceNode(name = "recommended-question-gen", type = "RECOMMEND_GEN")
@@ -66,8 +65,8 @@ public class RecommendedQuestionGenerator {
         try {
             int count = DEFAULT_RECOMMEND_COUNT;
             // 唯一的 prompt 输入预算权威：问题/答案/片段全在模型调用边界统一截断，避免与上游装配重复限制、也不受遗留数据影响
-            String prompt = promptTemplateLoader.render(
-                    RECOMMENDED_QUESTIONS_PROMPT_PATH,
+            String prompt = agentPromptResolver.render(
+                    AgentPromptSlot.RECOMMENDED_QUESTIONS,
                     Map.of(
                             "question", StrUtil.subPre(StrUtil.nullToEmpty(question), MAX_QUESTION_CHARS),
                             "answer", StrUtil.subPre(StrUtil.nullToEmpty(answer), MAX_ANSWER_CHARS),

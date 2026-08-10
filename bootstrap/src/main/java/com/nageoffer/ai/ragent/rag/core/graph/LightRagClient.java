@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.config.GraphProperties;
+import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -39,8 +40,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.function.Predicate;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * LightRAG 微服务 HTTP 客户端
@@ -49,7 +48,7 @@ import java.util.regex.Pattern;
  * 仅当 rag.graph.type=lightrag 时注册；任何调用失败都降级（检索返回空、写入记 warn），绝不阻断主链路
  * <p>
  * 重要：LightRAG /query 无 per-request workspace 参数——workspace 为实例级（由服务端 env 固定）
- * 故单实例即单图；按 KB 隔离子图需多实例，或在结果侧按 file_path 归属过滤，均属后续阶段
+ * 故单实例即单图，KB 归属只能在结果侧按 file_path 判定（见 retrieveByScope）；真正的子图隔离需多实例，属后续阶段
  */
 @Slf4j
 @Component
@@ -58,54 +57,36 @@ public class LightRagClient {
 
     private static final MediaType JSON = MediaType.parse("application/json");
 
-    /**
-     * file_path 中归属 docId 的匹配模式
-     * <p>
-     * 写入时 file_source 编码为 {collectionName}_{docId}，docId 为雪花纯数字；取 file_path 中最后一段连续数字为归属 docId，
-     * 兼容服务端可能对 file_path 追加的扩展名 / 路径修饰
-     */
-    private static final Pattern DOC_ID_PATTERN = Pattern.compile("(\\d+)");
-
     private final OkHttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final GraphProperties properties;
+    private final SearchChannelProperties searchProperties;
 
     public LightRagClient(@Qualifier("syncHttpClient") OkHttpClient httpClient,
                           ObjectMapper objectMapper,
-                          GraphProperties properties) {
+                          GraphProperties properties,
+                          SearchChannelProperties searchProperties) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.properties = properties;
+        this.searchProperties = searchProperties;
     }
 
     /**
-     * 检索图谱上下文，返回命中的来源证据（引用）：全局视图、不按库过滤
-     *
-     * @param question 查询问题
-     * @param mode     LightRAG 查询模式 naive / local / global / hybrid / mix
-     * @param topK     期望候选数
-     */
-    public List<RetrievedChunk> retrieve(String question, String mode, int topK) {
-        return retrieve(question, mode, topK, List.of());
-    }
-
-    /**
-     * 检索图谱上下文，并按 collections 过滤到命中库（结果侧「意图定向」）
+     * 检索图谱上下文，并按 collections 把证据切成「命中库 / 未命中库」两份
      * <p>
-     * only_need_context=true 只取证据、不让 LightRAG 生成答案；证据回到主链路，
-     * 由既有融合 / Rerank / 上下文组装统一处理，与其它通道一视同仁
-     * <p>
-     * LightRAG /query 无 per-request workspace，此处查全局图后在 Java 侧按 file_path 归属过滤到命中库，
-     * 与向量 / 关键词的「意图域」语义对齐；collections 为空表示不过滤（全局视图）
+     * only_need_context=true 只取证据、不让 LightRAG 生成答案，证据回主链路与其它通道一视同仁；
+     * 一次查询即全图，归属判定在结果侧完成，故切分不额外增加调用；
+     * 调用方据此给两份各自的名额，避免意图判错时未命中库证据被整体丢弃
      *
      * @param question    查询问题
      * @param mode        LightRAG 查询模式 naive / local / global / hybrid / mix
      * @param topK        期望候选数
-     * @param collections 目标知识库 collection 名，空则不过滤
+     * @param collections 目标知识库 collection 名，空则全部归入命中份
      */
-    public List<RetrievedChunk> retrieve(String question, String mode, int topK, Collection<String> collections) {
+    public GraphEvidence retrieveByScope(String question, String mode, int topK, Collection<String> collections) {
         if (StrUtil.isBlank(question)) {
-            return List.of();
+            return GraphEvidence.empty();
         }
         try {
             ObjectNode body = objectMapper.createObjectNode();
@@ -117,11 +98,11 @@ public class LightRagClient {
             if (topK > 0) {
                 body.put("top_k", topK);
             }
-            JsonNode root = post("/query", body);
-            return root != null ? parseReferences(root, collections) : List.of();
+            JsonNode root = postQuery(body);
+            return root != null ? parseReferences(root, collections) : GraphEvidence.empty();
         } catch (Exception e) {
             log.warn("LightRAG 检索失败，降级为空结果: {}", e.getMessage());
-            return List.of();
+            return GraphEvidence.empty();
         }
     }
 
@@ -239,16 +220,19 @@ public class LightRagClient {
     }
 
     /**
-     * 删除某知识库的全部图谱数据（按 collectionName 前缀 token 匹配）
+     * 删除某知识库的全部图谱数据
      * <p>
-     * file_source 编码为 {collectionName}_{docId}，故按 "{collectionName}_" token 命中该库全部文档
+     * 按 {@link GraphFileSource#parse} 解析出的库名等值匹配：库名可互为前缀（kb 与 kb_hr 合法共存），
+     * 子串匹配会连带删光别库的图谱数据且不可逆
      */
     public void deleteByCollection(String collectionName) {
         if (StrUtil.isBlank(collectionName)) {
             return;
         }
-        String token = collectionName + "_";
-        deleteMatching(filePath -> filePath.contains(token), "collection=" + collectionName);
+        deleteMatching(filePath -> {
+            GraphFileSource source = GraphFileSource.parse(filePath);
+            return source != null && collectionName.equals(source.collectionName());
+        }, "collection=" + collectionName);
     }
 
     /**
@@ -291,6 +275,20 @@ public class LightRagClient {
         }
     }
 
+    /**
+     * /query 专用：超时取通道级预算 rag.search.channels.timeout-ms，通道放弃结果后客户端没有理由继续等
+     * <=0 不另设；只有检索走此路，写入 / 删除 / 可视化沿用基础 client 默认超时，不受检索预算影响
+     */
+    private JsonNode postQuery(JsonNode body) throws Exception {
+        long timeoutMs = searchProperties.getChannels().getTimeoutMs();
+        OkHttpClient client = timeoutMs <= 0 ? httpClient : httpClient.newBuilder()
+                .callTimeout(Duration.ofMillis(timeoutMs))
+                .readTimeout(Duration.ofMillis(timeoutMs))
+                .build();
+        return execute(auth(new Request.Builder().url(url("/query"))
+                .post(RequestBody.create(objectMapper.writeValueAsString(body), JSON))), "/query", client);
+    }
+
     private JsonNode post(String path, JsonNode body) throws Exception {
         return execute(auth(new Request.Builder().url(url(path))
                 .post(RequestBody.create(objectMapper.writeValueAsString(body), JSON))), path);
@@ -321,14 +319,13 @@ public class LightRagClient {
     }
 
     /**
-     * 统一执行：按超时新建 client，非 2xx / 空响应返回 null，异常向上抛由调用方降级
+     * 统一执行：非 2xx / 空响应返回 null，异常向上抛由调用方降级
      */
     private JsonNode execute(Request.Builder builder, String path) throws Exception {
-        int timeoutMs = Math.max(1000, properties.getLightrag().getTimeoutMs());
-        OkHttpClient client = httpClient.newBuilder()
-                .callTimeout(Duration.ofMillis(timeoutMs))
-                .readTimeout(Duration.ofMillis(timeoutMs))
-                .build();
+        return execute(builder, path, httpClient);
+    }
+
+    private JsonNode execute(Request.Builder builder, String path, OkHttpClient client) throws Exception {
         try (Response response = client.newCall(builder.build()).execute()) {
             if (!response.isSuccessful()) {
                 log.warn("LightRAG 请求失败 path={}, code={}", path, response.code());
@@ -345,21 +342,23 @@ public class LightRagClient {
      * 结构 {@code {"response":"...","references":[{"reference_id","file_path","content":[...]}]}}；
      * references 缺失或为空时回退：把 response 上下文整体作为一个证据块，防御式读取
      * <p>
-     * collections 非空时按 file_path 归属过滤到命中库；此时 response 兜底块无 file_path、无法归属，故一并跳过
+     * collections 非空时按 file_path 归属切成两份；response 兜底块无 file_path、无法归属，故切分生效时跳过
+     * <p>
+     * 两份共用同一个全局名次计数器：名次是 LightRAG 在全图上给出的相关性序，
+     * 若各自从 0 起算，未命中份的强命中会与命中份的弱命中拿到同样的分数，凭空抹平图谱自己的判断
      */
-    private List<RetrievedChunk> parseReferences(JsonNode root, Collection<String> collections) {
+    private GraphEvidence parseReferences(JsonNode root, Collection<String> collections) {
         boolean filterByCollection = collections != null && !collections.isEmpty();
         List<RetrievedChunk> chunks = new ArrayList<>();
+        List<RetrievedChunk> unmatched = new ArrayList<>();
         JsonNode references = root.path("references");
         if (references.isArray() && !references.isEmpty()) {
             int rank = 0;
             for (JsonNode ref : references) {
                 String refId = ref.path("reference_id").asText("");
                 String filePath = ref.path("file_path").asText("");
-                // 结果侧按命中库过滤：不属于任一目标 collection 的证据丢弃（丢弃项不占名次，保持保留项名次连续）
-                if (filterByCollection && !matchesCollection(filePath, collections)) {
-                    continue;
-                }
+                // 结果侧按命中库切分：两份各自有序，名次取自全图统一序号
+                boolean matched = !filterByCollection || matchesCollection(filePath, collections);
                 StringBuilder text = new StringBuilder();
                 JsonNode content = ref.path("content");
                 if (content.isArray()) {
@@ -377,28 +376,32 @@ public class LightRagClient {
                 if (StrUtil.isBlank(body)) {
                     continue;
                 }
-                // 从 file_path({collectionName}_{docId}) 解析归属 docId，让图谱证据与向量证据在文档层面对齐：
-                // 末端富化据此按 docId 补真实标题，并与同源向量证据聚合进同一文档块
-                String docId = parseDocId(filePath);
-                // 分数取按名次递减的中性分数 1/(rank+1)：无量纲，仅表达通道内相对顺序，
+                // 从 file_path 解析归属库与 docId，让图谱证据与向量证据在库 / 文档两个层面对齐：
+                // collection 供下游按库推导意图归属，docId 供末端富化补真实标题并与同源向量证据聚合
+                GraphFileSource source = GraphFileSource.parse(filePath);
+                String docId = source != null ? source.docId() : null;
+                // 分数取按全图名次递减的中性分数 1/(rank+1)：无量纲，仅表达图谱视角下的相对顺序，
                 // 多通道时由 FusionPostProcessor(RRF) 重算，开启 Rerank 时由精排模型覆盖
-                chunks.add(RetrievedChunk.builder()
+                (matched ? chunks : unmatched).add(RetrievedChunk.builder()
                         .id(StrUtil.isNotBlank(refId) ? refId : "graph:" + rank)
                         .text(body)
                         .score(1.0f / (rank + 1))
+                        .collectionName(source != null ? source.collectionName() : null)
                         .docId(docId)
                         // docId 解析到则留空 docName、交富化按 docId 补真实标题；解析不到才回退 file_path 以免完全无来源
                         .docName(docId != null ? null : (StrUtil.isNotBlank(filePath) ? filePath : null))
                         .build());
                 rank++;
             }
-            return chunks;
+            return new GraphEvidence(chunks, unmatched);
         }
-        // 回退：references 关闭或为空时，用 response 上下文兜底为单个证据块
-        // 过滤生效时该兜底块无 file_path、无法归属命中库，跳过以免破坏「意图定向」语义
-        if (!filterByCollection) {
-            String context = root.path("response").asText("");
-            if (StrUtil.isNotBlank(context)) {
+        // 回退：references 缺失时把 response 上下文兜底为单个证据块
+        // 兜底块无 file_path、无法归属，过滤生效时丢弃；告警是因为这通常意味着服务端不支持 references
+        String context = root.path("response").asText("");
+        if (StrUtil.isNotBlank(context)) {
+            if (filterByCollection) {
+                log.warn("LightRAG 未返回 references，兜底上下文无法按库归属已丢弃，请检查服务端版本与 include_references 支持");
+            } else {
                 chunks.add(RetrievedChunk.builder()
                         .id("graph:context")
                         .text(context)
@@ -406,41 +409,17 @@ public class LightRagClient {
                         .build());
             }
         }
-        return chunks;
+        return new GraphEvidence(chunks, unmatched);
     }
 
     /**
-     * file_path 是否命中给定任一 collection
+     * file_path 是否归属给定任一 collection
      * <p>
-     * 按 {collectionName}_ 前缀 token 判断，与 deleteByCollection 同一 token 语义，抗服务端 file_path 归一化
+     * 解析出全名后等值比较，与 deleteByCollection 同一判定；解析失败视为不归属，
+     * 证据落入补充份而非主份，比误归属安全
      */
     private boolean matchesCollection(String filePath, Collection<String> collections) {
-        if (StrUtil.isBlank(filePath)) {
-            return false;
-        }
-        for (String collectionName : collections) {
-            if (StrUtil.isNotBlank(collectionName) && filePath.contains(collectionName + "_")) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * 从 file_path 解析归属 docId
-     * <p>
-     * 取最后一段连续数字：docId 为雪花纯数字且是 {collectionName}_{docId} 的末段，故为 file_path 中最后一个数字串；
-     * 无数字则返回 null（图谱证据退化为无 docId，仅影响文档聚合、不影响召回）
-     */
-    private String parseDocId(String filePath) {
-        if (StrUtil.isBlank(filePath)) {
-            return null;
-        }
-        Matcher matcher = DOC_ID_PATTERN.matcher(filePath);
-        String docId = null;
-        while (matcher.find()) {
-            docId = matcher.group(1);
-        }
-        return docId;
+        GraphFileSource source = GraphFileSource.parse(filePath);
+        return source != null && collections.contains(source.collectionName());
     }
 }

@@ -79,11 +79,6 @@ public class RAGConstant {
      */
     public static final String GUIDANCE_AMBIGUITY_CHECK_PROMPT_PATH = "prompt/guidance-ambiguity-check.st";
 
-    /**
-     * 系统对话提示词模板路径
-     * 定义企业知识助手「小码」的角色设定和对话规则，包括打招呼、自我介绍、问题分类处理等场景。模板通过 {@code {question}} 占位符接收用户问题。
-     */
-    public static final String CHAT_SYSTEM_PROMPT_PATH = "prompt/answer-chat-system.st";
 
     /**
      * 查询改写 + 多问句拆分提示词模板路径
@@ -91,11 +86,6 @@ public class RAGConstant {
      */
     public static final String QUERY_REWRITE_AND_SPLIT_PROMPT_PATH = "prompt/user-question-rewrite.st";
 
-    /**
-     * 对话记忆压缩提示词模板路径
-     * 通过 {@code {summary_max_chars}} 控制摘要长度上限
-     */
-    public static final String CONVERSATION_SUMMARY_PROMPT_PATH = "prompt/conversation-summary.st";
 
     /**
      * 会话标题生成提示词模板路径
@@ -103,11 +93,6 @@ public class RAGConstant {
      */
     public static final String CONVERSATION_TITLE_PROMPT_PATH = "prompt/conversation-title.st";
 
-    /**
-     * 默认 RAG 问答提示词模板路径
-     * 用于指导大模型基于检索到的文档内容进行准确回答，包含严格的事实性约束和链接处理规则
-     */
-    public static final String RAG_ENTERPRISE_PROMPT_PATH = "prompt/answer-chat-kb.st";
 
     /**
      * 知识资料回答的行内引用规则
@@ -128,23 +113,8 @@ public class RAGConstant {
      */
     public static final String MCP_PARAMETER_EXTRACT_USER_PROMPT_PATH = "prompt/mcp-parameter-extract-user.st";
 
-    /**
-     * MCP-only 场景提示词模板路径
-     * 仅动态数据片段时使用
-     */
-    public static final String MCP_ONLY_PROMPT_PATH = "prompt/answer-chat-mcp.st";
 
-    /**
-     * MCP + KB 混合场景提示词模板路径
-     * 兼顾动态数据片段与知识库内容的综合回答
-     */
-    public static final String MCP_KB_MIXED_PROMPT_PATH = "prompt/answer-chat-mcp-kb-mixed.st";
 
-    /**
-     * 推荐追问问题生成提示词模板路径
-     * 通过 {@code {question}}、{@code {answer}}、{@code {count}} 注入问答与生成数量
-     */
-    public static final String RECOMMENDED_QUESTIONS_PROMPT_PATH = "prompt/recommended-questions.st";
 
     // ==================== 上下文格式化模板（单文件多 section） ====================
 

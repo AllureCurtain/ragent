@@ -47,11 +47,6 @@ public class GraphProperties {
     private LightRag lightrag = new LightRag();
 
     /**
-     * 摄取侧同步配置
-     */
-    private Ingestion ingestion = new Ingestion();
-
-    /**
      * 图谱侧 embedding 模型标识
      * 独立于各知识库的向量 embedding，首次索引后不可更换
      */
@@ -79,36 +74,10 @@ public class GraphProperties {
         private String apiKey = "";
 
         /**
-         * 查询模式：naive / local / global / hybrid / mix
+         * LightRAG 检索算法（naive / local / global / hybrid / mix），透传 /query 的 mode 字段
+         * mix 在图谱证据外混入 LightRAG 内部向量检索的 chunk：与向量通道内容重复但 id 不同，RRF 去不掉重；
+         * hybrid 只回图结构关联的证据，与向量 / 关键词通道正交；naive 完全不走图，本架构下不建议
          */
-        private String queryMode = "mix";
-
-        /**
-         * 请求超时（毫秒）
-         */
-        private int timeoutMs = 30000;
-    }
-
-    @Data
-    public static class Ingestion {
-
-        /**
-         * 是否启用写入同步：把向量写链路的新增 / 删除同步进图谱
-         * 默认 true——只要图谱后端已启用（type=lightrag）即随向量写自动重建图谱，与历史行为一致
-         * 置 false 可在保留可视化 / 检索读取的同时冻结图谱写入，
-         * 适用于「已接入后端、当前不做图谱检索、也不想再为每篇文档付出实体抽取成本」的场景
-         */
-        private boolean enabled = true;
-
-        /**
-         * 是否异步同步：标脏入队 + 后台防抖重建，默认 true 不阻塞主写链路
-         */
-        private boolean async = true;
-
-        /**
-         * 是否额外写入全局图 workspace（跨库方案 B）
-         * 默认 false：Phase1 用逐库 fan-out 兜底，不双写
-         */
-        private boolean globalWorkspace = false;
+        private String queryMode = "hybrid";
     }
 }

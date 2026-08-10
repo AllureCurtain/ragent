@@ -17,6 +17,10 @@
 
 package com.nageoffer.ai.ragent.audit.constant;
 
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
+
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class BizChangeBizType {
 
     public static final String KNOWLEDGE_BASE = "KNOWLEDGE_BASE";
@@ -28,7 +32,5 @@ public final class BizChangeBizType {
     public static final String QUERY_TERM_MAPPING = "QUERY_TERM_MAPPING";
     public static final String SAMPLE_QUESTION = "SAMPLE_QUESTION";
     public static final String USER = "USER";
-
-    private BizChangeBizType() {
-    }
+    public static final String AGENT_PROFILE = "AGENT_PROFILE";
 }

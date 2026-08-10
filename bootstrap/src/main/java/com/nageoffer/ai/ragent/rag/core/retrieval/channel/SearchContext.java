@@ -62,6 +62,11 @@ public class SearchContext {
     private RetrievalBudget budget;
 
     /**
+     * 检索作用域：定向命中库还是全库，请求入口算一次，各通道共读一份
+     */
+    private RetrievalScope retrievalScope;
+
+    /**
      * 扩展元数据
      */
     @Builder.Default

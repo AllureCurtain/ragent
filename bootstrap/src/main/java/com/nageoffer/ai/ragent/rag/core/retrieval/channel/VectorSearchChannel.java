@@ -17,48 +17,46 @@
 
 package com.nageoffer.ai.ragent.rag.core.retrieval.channel;
 
-import cn.hutool.core.collection.CollUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
-import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
-import com.nageoffer.ai.ragent.rag.core.intent.NodeScoreFilters;
+import com.nageoffer.ai.ragent.rag.core.retrieval.RetrievalBudget;
+import com.nageoffer.ai.ragent.rag.core.retrieval.RetrieveRequest;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorRetrieverService;
 import com.nageoffer.ai.ragent.rag.core.vector.strategy.CollectionParallelRetriever;
-import com.nageoffer.ai.ragent.rag.core.vector.strategy.IntentParallelRetriever;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
 /**
  * 向量检索通道
  * <p>
- * 向量模态收敛为一条通道：意图定向与全局本质是同一 embedding 查询、只是 collection 作用域不同
- * （意图定向 = 命中库；全局 = 全库，是前者的超集）。因此不再拆成两条并列通道各跑一次、再对相关证据做自我 RRF 融合，
- * 而是按 KB 意图置信度在通道内二选一作用域，只做单次向量检索：
- * 有足够置信的 KB 意图 → 收窄到命中库（意图定向）；无 / 低置信 → 退化为全库检索（全局兜底）
+ * 向量模态收敛为一条通道：定向与全局是同一 embedding 查询、只是 collection 范围不同，
+ * 拆成两条并列通道会让同一份证据在 RRF 里自我加权
+ * <p>
+ * 定向作用域下并行补一路「未命中库」：意图判错时正确证据只在未命中库里，
+ * 而判错与否事前无从可靠判定（意图分未校准）、事后也测不出（错库内容余弦未必低），
+ * 故不做判定、直接给补充路固定候选名额，与定向路一起交下游精排
  */
 @Slf4j
 @Component
 public class VectorSearchChannel implements SearchChannel {
 
     private final SearchChannelProperties properties;
-    private final KbCollectionProvider kbCollectionProvider;
     private final VectorRetrieverService retrieverService;
-    private final IntentParallelRetriever intentRetriever;
     private final CollectionParallelRetriever globalRetriever;
+    private final Executor retrievalExecutor;
 
     public VectorSearchChannel(VectorRetrieverService retrieverService,
                                SearchChannelProperties properties,
-                               KbCollectionProvider kbCollectionProvider,
                                Executor innerRetrievalExecutor) {
         this.properties = properties;
-        this.kbCollectionProvider = kbCollectionProvider;
         this.retrieverService = retrieverService;
-        this.intentRetriever = new IntentParallelRetriever(retrieverService, innerRetrievalExecutor);
         this.globalRetriever = new CollectionParallelRetriever(retrieverService, innerRetrievalExecutor);
+        this.retrievalExecutor = innerRetrievalExecutor;
     }
 
     @Override
@@ -68,7 +66,7 @@ public class VectorSearchChannel implements SearchChannel {
 
     @Override
     public boolean isEnabled(SearchContext context) {
-        // 一条通道一个开关；启用后内部总有一条作用域可走（意图定向或全局兜底）
+        // 一条通道一个开关；启用后内部总有一条作用域可走
         return properties.getChannels().getVector().isEnabled();
     }
 
@@ -77,22 +75,18 @@ public class VectorSearchChannel implements SearchChannel {
         long startTime = System.currentTimeMillis();
 
         try {
-            List<NodeScore> kbIntents = extractKbIntents(context);
-
+            RetrievalScope scope = context.getRetrievalScope();
             List<RetrievedChunk> chunks;
             Map<String, Object> metadata;
-            if (shouldNarrowToIntent(kbIntents)) {
-                chunks = retrieveByIntent(context, kbIntents);
-                metadata = Map.of("scope", "intent", "intentCount", kbIntents.size());
+            if (scope.directed()) {
+                chunks = retrieveDirected(context, scope);
+                metadata = Map.of("scope", "directed", "topScore", scope.topScore());
             } else {
-                chunks = retrieveGlobal(context);
-                metadata = Map.of("scope", "global");
+                chunks = retrieveGlobal(context, scope);
+                metadata = Map.of("scope", "global", "topScore", scope.topScore());
             }
 
             long latency = System.currentTimeMillis() - startTime;
-            log.info("向量检索完成（作用域：{}），检索到 {} 个 Chunk，耗时 {}ms",
-                    metadata.get("scope"), chunks.size(), latency);
-
             return SearchChannelResult.builder()
                     .channelType(SearchChannelType.VECTOR)
                     .channelName(getName())
@@ -103,12 +97,7 @@ public class VectorSearchChannel implements SearchChannel {
 
         } catch (Exception e) {
             log.error("向量检索失败", e);
-            return SearchChannelResult.builder()
-                    .channelType(SearchChannelType.VECTOR)
-                    .channelName(getName())
-                    .chunks(List.of())
-                    .latencyMs(System.currentTimeMillis() - startTime)
-                    .build();
+            return emptyResult(System.currentTimeMillis() - startTime);
         }
     }
 
@@ -118,80 +107,96 @@ public class VectorSearchChannel implements SearchChannel {
     }
 
     /**
-     * 提取达到最低分的 KB 意图，作为「是否收窄作用域」的判定依据
+     * 定向作用域：对命中库取主路候选，同时并行补一路未命中库
+     * 定向与全局同一取数原语、只差库集合；两路共用一次 embedding、同池并发，补充路不增加通道延迟
      */
-    private List<NodeScore> extractKbIntents(SearchContext context) {
-        if (CollUtil.isEmpty(context.getIntents())) {
-            return List.of();
-        }
-        double minScore = properties.getChannels().getVector().getIntentDirected().getMinIntentScore();
-        List<NodeScore> allScores = context.getIntents().stream()
-                .flatMap(si -> si.nodeScores().stream())
-                .toList();
-        return NodeScoreFilters.kb(allScores, minScore).stream()
-                .filter(nodeScore -> !nodeScore.getNode().getEffectiveCollectionNames().isEmpty())
-                .toList();
+    private List<RetrievedChunk> retrieveDirected(SearchContext context, RetrievalScope scope) {
+        String question = context.getMainQuestion();
+        float[] queryVector = retrieverService.embedAndNormalize(question);
+        ScopeQuota quota = ScopeQuota.split(scope, resolveDirectedBudget(scope, context.getBudget()), supplementRatio());
+
+        // 补充路失败必须只损失自己：它拿到的是兜底名额，而 join() 抛出会让已经取回的定向证据一起被
+        // 通道级 catch 丢掉——兜底路把主路带走，鲁棒性方向正好反了
+        CompletableFuture<List<RetrievedChunk>> supplementTask = quota.supplement() > 0
+                ? CompletableFuture.<List<RetrievedChunk>>supplyAsync(
+                () -> retrieveOver(question, queryVector, scope.supplementCollections(), quota.supplement()),
+                retrievalExecutor)
+                .exceptionally(e -> {
+                    log.warn("向量补充路检索失败，仅丢弃补充证据: {}", e.getMessage());
+                    return List.of();
+                })
+                : CompletableFuture.completedFuture(List.of());
+
+        List<RetrievedChunk> directed = retrieveOver(question, queryVector, scope.targetCollections(), quota.primary());
+        List<RetrievedChunk> supplement = supplementTask.join();
+
+        log.info("向量检索完成（定向），意图 top1={}，命中 {} 库 {} 条（最高余弦 {}），补充 {} 库 {} 条（最高余弦 {}）",
+                scope.topScore(), scope.targetCollections().size(), directed.size(), ChunkRanking.topScoreOf(directed),
+                scope.supplementCollections().size(), supplement.size(), ChunkRanking.topScoreOf(supplement));
+        return ChunkRanking.mergeByScore(directed, supplement);
     }
 
     /**
-     * 是否收窄到意图作用域：有 KB 意图且置信度足够高
-     * 「要不要只查这几个库」只由 KB 意图置信度决定，与非 KB 意图（如 MCP 工具）无关
+     * 定向路的通道产出额度：意图级 node.topK 覆盖每通道默认额度 recallBudget，是绝对深度、可大可小
+     * <p>
+     * 逐库取数后一次查询只有一个深度，多意图命中时取最大值——取大只放宽召回、多出的候选交给精排收敛，
+     * 任何按意图切分配额的方案都是在重造 fan-out。再按候选池上限钳制：超出的部分进不了 Rerank，查了也是空转
      */
-    private boolean shouldNarrowToIntent(List<NodeScore> kbIntents) {
-        if (CollUtil.isEmpty(kbIntents)) {
-            log.info("未识别出 KB 意图，向量检索走全局作用域");
-            return false;
-        }
-
-        SearchChannelProperties.Global global = properties.getChannels().getVector().getGlobal();
-        double maxScore = kbIntents.stream()
-                .mapToDouble(NodeScore::getScore)
+    private int resolveDirectedBudget(RetrievalScope scope, RetrievalBudget budget) {
+        int depth = scope.intents().stream()
+                .mapToInt(nodeScore -> {
+                    Integer topK = nodeScore.getNode() == null ? null : nodeScore.getNode().getTopK();
+                    return topK != null && topK > 0 ? topK : budget.recallBudget();
+                })
                 .max()
-                .orElse(0.0);
-
-        if (maxScore < global.getConfidenceThreshold()) {
-            log.info("KB 意图置信度过低（{}），向量检索走全局作用域", maxScore);
-            return false;
-        }
-
-        if (kbIntents.size() == 1 && maxScore < global.getSingleIntentSupplementThreshold()) {
-            log.info("单一中等置信度 KB 意图（{}），向量检索走全局作用域兜底", maxScore);
-            return false;
-        }
-
-        return true;
+                .orElse(budget.recallBudget());
+        int candidateLimit = budget.candidateLimit();
+        return candidateLimit > 0 ? Math.min(depth, candidateLimit) : depth;
     }
 
     /**
-     * 意图作用域：并行检索命中意图；单个意图下的全部 Collection 共享一个召回预算
-     * （node.topK 可覆盖为该意图的绝对总深度）
+     * 全局作用域：跨全部有效库检索
+     * 取数深度与其他通道同源、只受 recallBudget 管——候选池上限是 RRF 之后的闸门而非取数目标
      */
-    private List<RetrievedChunk> retrieveByIntent(SearchContext context, List<NodeScore> kbIntents) {
-        log.info("执行向量检索（意图作用域），命中 {} 个 KB 意图，问题：{}", kbIntents.size(), context.getMainQuestion());
-        return intentRetriever.retrieveByIntents(
-                context.getMainQuestion(), kbIntents, context.getBudget().recallBudget());
-    }
-
-    /**
-     * 全局作用域：跨全部有效库检索（PG 单条 SQL 带总预算 / 其他后端逐库并行 fan-out 兜底）
-     */
-    private List<RetrievedChunk> retrieveGlobal(SearchContext context) {
-        log.info("执行向量检索（全局作用域），问题：{}", context.getMainQuestion());
-
-        List<String> collections = kbCollectionProvider.listActiveCollections();
-        if (collections.isEmpty()) {
+    private List<RetrievedChunk> retrieveGlobal(SearchContext context, RetrievalScope scope) {
+        if (scope.targetCollections().isEmpty()) {
             log.warn("未找到任何 KB collection，跳过全局检索");
             return List.of();
         }
+        String question = context.getMainQuestion();
+        List<RetrievedChunk> chunks = retrieveOver(question, retrieverService.embedAndNormalize(question),
+                scope.targetCollections(), context.getBudget().recallBudget());
 
-        SearchChannelProperties.Global config = properties.getChannels().getVector().getGlobal();
-        if (retrieverService.supportsGlobalRetrieval()) {
-            // 后端支持单次全局检索（如 PG）：一条带总预算的 SQL 跨库召回。candidate-budget 未配置时跟随 Rerank 候选池上限
-            int budget = config.resolveCandidateBudget(context.getBudget().candidateLimit());
-            return retrieverService.retrieveGlobal(context.getMainQuestion(), collections, budget);
+        log.info("向量检索完成（全局），意图 top1={}，{} 库 {} 条（最高余弦 {}）",
+                scope.topScore(), scope.targetCollections().size(), chunks.size(), ChunkRanking.topScoreOf(chunks));
+        return chunks;
+    }
+
+    /**
+     * 在给定 collection 范围内取一路候选：按相关性降序、条数不超过 budget
+     * <p>
+     * 后端支持跨库过滤（PG / Milvus 共享库）时一次查询带总预算即可；否则逐库并行 fan-out 兜底，
+     * 每库各取 budget 再统一截断——多取是为了拿到真正的全局前 budget 条（哪个库有好料事前不知道），
+     * 但截断不能省：省掉它 budget 就从「总量」悄悄变成「每库上限」，补充路名额被放大成 库数 × 名额
+     * <p>
+     * 排序在截断之前，且后端返回序不能直接信：PG 开了 {@code hnsw.iterative_scan=relaxed_order}，
+     * pgvector 在该模式下允许轻微乱序且规划器不补 Sort 节点，先排后截才是取全局最优的前 budget 条
+     */
+    private List<RetrievedChunk> retrieveOver(String question, float[] queryVector, List<String> collections, int budget) {
+        if (collections.isEmpty()) {
+            return List.of();
         }
-        // 后端不支持单次全局检索时：退化为逐库并行 fan-out 兜底，每库取候选预算，合并后交下游截断
-        int perCollectionBudget = config.resolveCandidateBudget(context.getBudget().candidateLimit());
-        return globalRetriever.executeParallelRetrieval(context.getMainQuestion(), collections, perCollectionBudget);
+        List<RetrievedChunk> chunks = retrieverService.supportsGlobalRetrieval()
+                ? retrieverService.retrieveByVector(queryVector, RetrieveRequest.builder()
+                .collectionNames(collections)
+                .query(question)
+                .topK(budget)
+                .build())
+                : globalRetriever.executeParallelRetrieval(question, collections, budget, queryVector);
+        return ScopeQuota.cap(ChunkRanking.sortedByScore(chunks), budget);
+    }
+
+    private double supplementRatio() {
+        return properties.getScope().getSupplementRatio();
     }
 }

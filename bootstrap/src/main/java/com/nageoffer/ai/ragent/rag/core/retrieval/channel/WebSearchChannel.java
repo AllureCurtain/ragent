@@ -106,14 +106,14 @@ public class WebSearchChannel implements SearchChannel {
             String query = context.getMainQuestion();
             if (StrUtil.isBlank(query)) {
                 log.info("You.com 联网检索问题为空，跳过");
-                return emptyResult(startTime);
+                return emptyResult(System.currentTimeMillis() - startTime);
             }
 
             SearchChannelProperties.WebSearch config = properties.getChannels().getWebSearch();
             HttpUrl httpUrl = HttpUrl.parse(config.getApiUrl());
             if (httpUrl == null) {
                 log.warn("You.com 联网检索 api-url 配置非法：{}，返回空结果", config.getApiUrl());
-                return emptyResult(startTime);
+                return emptyResult(System.currentTimeMillis() - startTime);
             }
 
             Request request = new Request.Builder()
@@ -137,7 +137,7 @@ public class WebSearchChannel implements SearchChannel {
                 if (!response.isSuccessful()) {
                     // 401 鉴权失败 / 429 限流 / 5xx 服务端异常等统一降级为空结果（不打印 Key）
                     log.warn("You.com 联网检索请求失败, code={}, 返回空结果", response.code());
-                    return emptyResult(startTime);
+                    return emptyResult(System.currentTimeMillis() - startTime);
                 }
                 String body = response.body() != null ? response.body().string() : "";
                 chunks = parseChunks(body, resolveCount(config));
@@ -155,7 +155,7 @@ public class WebSearchChannel implements SearchChannel {
         } catch (Exception e) {
             // 联网检索属于补充通道，任何异常（含超时、响应解析失败）都不允许向上抛出
             log.warn("You.com 联网检索失败，降级为空结果: {}", e.getMessage());
-            return emptyResult(startTime);
+            return emptyResult(System.currentTimeMillis() - startTime);
         }
     }
 
@@ -263,12 +263,4 @@ public class WebSearchChannel implements SearchChannel {
         return System.getenv(name);
     }
 
-    private SearchChannelResult emptyResult(long startTime) {
-        return SearchChannelResult.builder()
-                .channelType(SearchChannelType.WEB_SEARCH)
-                .channelName(getName())
-                .chunks(List.of())
-                .latencyMs(System.currentTimeMillis() - startTime)
-                .build();
-    }
 }

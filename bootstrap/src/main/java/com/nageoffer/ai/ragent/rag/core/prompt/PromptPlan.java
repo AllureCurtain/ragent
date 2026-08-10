@@ -32,7 +32,7 @@ import java.util.List;
 public class PromptPlan {
 
     /**
-     * 剔除无检索结果后保留的意图
+     * 用于选择模板的候选意图
      */
     private List<NodeScore> retainedIntents;
 

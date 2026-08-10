@@ -18,6 +18,7 @@
 package com.nageoffer.ai.ragent.rag.core.vector.decorator;
 
 import com.nageoffer.ai.ragent.core.chunk.model.EmbeddedChunk;
+import com.nageoffer.ai.ragent.rag.core.graph.GraphFileSource;
 import com.nageoffer.ai.ragent.rag.core.graph.LightRagClient;
 import com.nageoffer.ai.ragent.rag.core.vector.VectorStoreService;
 import lombok.extern.slf4j.Slf4j;
@@ -76,11 +77,10 @@ public class GraphSyncingVectorStoreService implements VectorStoreService {
     }
 
     /**
-     * 图谱 file_source 编码：{collectionName}_{docId}
-     * 单文档删除按 docId token 命中、整库删除按 {collectionName}_ 前缀 token 命中，且不受服务端 file_path 归一化影响
+     * 图谱 file_source 编码，读取侧的归属判定与删除匹配依赖同一格式，见 {@link GraphFileSource}
      */
     private String fileSource(String collectionName, String docId) {
-        return collectionName + "_" + docId;
+        return GraphFileSource.encode(collectionName, docId);
     }
 
     /**

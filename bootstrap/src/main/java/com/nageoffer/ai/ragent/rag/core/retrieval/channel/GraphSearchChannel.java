@@ -21,9 +21,8 @@ import cn.hutool.core.collection.CollUtil;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.config.GraphProperties;
 import com.nageoffer.ai.ragent.rag.config.SearchChannelProperties;
+import com.nageoffer.ai.ragent.rag.core.graph.GraphEvidence;
 import com.nageoffer.ai.ragent.rag.core.graph.LightRagClient;
-import com.nageoffer.ai.ragent.rag.core.intent.NodeScore;
-import com.nageoffer.ai.ragent.rag.core.intent.NodeScoreFilters;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -39,8 +38,8 @@ import java.util.List;
  * <p>
  * 与其他通道并行执行，结果统一进 RRF 融合，通道间无先后与优先级之分
  * <p>
- * 说明：LightRAG /query 无 per-request workspace，单实例即单图，本通道 Phase1 面向全局图召回；
- * 按 KB 隔离子图（借 file_path 归属过滤或多实例）留待后续阶段。mode=intent 时无 KB 意图则跳过，语义对齐关键词通道
+ * 说明：LightRAG /query 无 per-request workspace，单实例即单图，故本通道查全图后在结果侧按 file_path 归属切分；
+ * 真正的子图隔离需多实例，留待后续阶段
  */
 @Slf4j
 @Component
@@ -49,8 +48,8 @@ import java.util.List;
 public class GraphSearchChannel implements SearchChannel {
 
     /**
-     * 过滤时向 LightRAG 的请求量上浮倍数
-     * 结果侧过滤在 top_k 截断后再筛掉跨库证据，命中库证据可能变少，过滤时多取以补召回
+     * 定向过滤时向 LightRAG 的请求量上浮倍数
+     * 结果侧过滤在 top_k 截断后再筛掉跨库证据，命中库证据可能变少，多取以补召回；全局过滤只筛残留，不上浮
      */
     private static final int FILTER_TOPK_BOOST = 3;
 
@@ -77,51 +76,44 @@ public class GraphSearchChannel implements SearchChannel {
     public SearchChannelResult search(SearchContext context) {
         long startTime = System.currentTimeMillis();
         try {
-            // 有 KB 意图则收敛到命中库过滤，否则空集=查全局图不过滤（与向量通道自动作用域一致：意图优先、无意图全局）
-            List<String> collections = extractIntentCollections(context);
+            // 作用域由引擎统一解析：定向为命中库，全局为全部有效库
+            // 全局也下发库集做结果侧过滤：图谱删除是 best-effort，已删库的残留只能在这里拦住
+            RetrievalScope scope = context.getRetrievalScope();
+            List<String> collections = scope.targetCollections();
+            if (CollUtil.isEmpty(collections)) {
+                log.info("图谱检索未解析到有效知识库，跳过");
+                return emptyResult(System.currentTimeMillis() - startTime);
+            }
 
             int baseTopK = context.getBudget().recallBudget();
-            // 过滤生效时上浮请求量补召回；全局不过滤则用基础量
-            int topK = CollUtil.isEmpty(collections) ? baseTopK : baseTopK * FILTER_TOPK_BOOST;
+            int topK = scope.directed() ? baseTopK * FILTER_TOPK_BOOST : baseTopK;
             String queryMode = graphProperties.getLightrag().getQueryMode();
 
-            List<RetrievedChunk> chunks = lightRagClient.retrieve(context.getMainQuestion(), queryMode, topK, collections);
+            GraphEvidence evidence = lightRagClient.retrieveByScope(
+                    context.getMainQuestion(), queryMode, topK, collections);
+            if (!scope.directed() && !evidence.unmatched().isEmpty()) {
+                log.warn("图谱全局检索过滤掉 {} 条无主证据（已删库残留或解析失败），残留会挤占 top_k 名额，建议清理图谱",
+                        evidence.unmatched().size());
+            }
+            ScopeQuota quota = ScopeQuota.split(scope, baseTopK, properties.getScope().getSupplementRatio());
+            List<RetrievedChunk> primary = ScopeQuota.cap(evidence.matched(), quota.primary());
+            List<RetrievedChunk> supplement = ScopeQuota.cap(evidence.unmatched(), quota.supplement());
 
             long latency = System.currentTimeMillis() - startTime;
-            log.info("图谱检索完成，范围={}，检索到 {} 个证据，耗时 {}ms",
-                    CollUtil.isEmpty(collections) ? "全局" : collections, chunks.size(), latency);
+            log.info("图谱检索完成，范围={}，命中 {} 条，补充 {} 条，耗时 {}ms",
+                    scope.directed() ? collections : "全局(" + collections.size() + "库)",
+                    primary.size(), supplement.size(), latency);
 
+            // 两份候选的分数同出一个全图名次序，按分混排即还原图谱自己的排序
             return SearchChannelResult.builder()
                     .channelType(SearchChannelType.GRAPH)
                     .channelName(getName())
-                    .chunks(chunks)
+                    .chunks(ChunkRanking.mergeByScore(primary, supplement))
                     .latencyMs(latency)
                     .build();
         } catch (Exception e) {
             log.error("图谱检索失败", e);
-            return emptyResult(startTime);
+            return emptyResult(System.currentTimeMillis() - startTime);
         }
-    }
-
-    /**
-     * 从意图识别结果提取 KB 意图对应的 collection 名称
-     */
-    private List<String> extractIntentCollections(SearchContext context) {
-        if (CollUtil.isEmpty(context.getIntents())) {
-            return List.of();
-        }
-        List<NodeScore> allScores = context.getIntents().stream()
-                .flatMap(si -> si.nodeScores().stream())
-                .toList();
-        return NodeScoreFilters.kbCollections(allScores);
-    }
-
-    private SearchChannelResult emptyResult(long startTime) {
-        return SearchChannelResult.builder()
-                .channelType(SearchChannelType.GRAPH)
-                .channelName(getName())
-                .chunks(List.of())
-                .latencyMs(System.currentTimeMillis() - startTime)
-                .build();
     }
 }

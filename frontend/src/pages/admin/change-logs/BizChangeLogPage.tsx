@@ -9,6 +9,7 @@ import {
   ListChecks,
   MessagesSquare,
   Network,
+  Orbit,
   ScrollText,
   Search,
   ShieldCheck,
@@ -26,13 +27,7 @@ import { RelativeTime } from "@/components/RelativeTime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -63,13 +58,11 @@ const ALL_VALUE = "__all__";
 
 const FILTER_SELECT_TRIGGER_CLASS =
   "h-10 border-slate-200 text-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:border-slate-200 data-[state=open]:ring-0";
-const FILTER_INPUT_CLASS =
-  "h-10 border-slate-200 text-sm focus-visible:border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0";
+const FILTER_INPUT_CLASS = "h-10 border-slate-200 text-sm focus-visible:border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0";
 
 const pad2 = (value: number) => String(value).padStart(2, "0");
 
-const toDateInput = (date: Date) =>
-  `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+const toDateInput = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 
 // 默认查询最近一个月的数据
 const defaultDateRange = () => {
@@ -94,9 +87,10 @@ const SUCCESS_OPTIONS = [
 ];
 
 const BIZ_TYPE_OPTIONS = [
+  { value: "AGENT_PROFILE", label: "智能体" },
   { value: "KNOWLEDGE_BASE", label: "知识库" },
   { value: "KNOWLEDGE_DOCUMENT", label: "文档" },
-  { value: "KNOWLEDGE_CHUNK", label: "Chunk" },
+  { value: "KNOWLEDGE_CHUNK", label: "文档分块" },
   { value: "INGESTION_PIPELINE", label: "数据通道" },
   { value: "INGESTION_TASK", label: "采集任务" },
   { value: "INTENT_TREE", label: "意图树" },
@@ -135,17 +129,19 @@ const parseJson = (value?: string | null): unknown => {
   }
 };
 
-// 图标承担实体辨识，颜色只保留品牌层级，避免业务类型形成彩虹色谱。
+// 业务类型的图标与配色，让业务列更有辨识度也更大气
 const BIZ_TYPE_META: Record<string, { icon: LucideIcon; className: string }> = {
-  KNOWLEDGE_BASE: { icon: Database, className: "bg-primary/10 text-primary" },
-  KNOWLEDGE_DOCUMENT: { icon: FileText, className: "bg-primary/10 text-primary" },
-  KNOWLEDGE_CHUNK: { icon: Boxes, className: "bg-primary/10 text-primary" },
-  INGESTION_PIPELINE: { icon: Workflow, className: "bg-secondary text-secondary-foreground" },
-  INGESTION_TASK: { icon: ListChecks, className: "bg-secondary text-secondary-foreground" },
-  INTENT_TREE: { icon: Network, className: "bg-muted text-foreground" },
-  QUERY_TERM_MAPPING: { icon: Tags, className: "bg-muted text-muted-foreground" },
-  SAMPLE_QUESTION: { icon: MessagesSquare, className: "bg-primary/10 text-primary" },
-  USER: { icon: User, className: "bg-secondary text-secondary-foreground" }
+  // 跟 AgentAvatar 的 orbit-indigo 预设对齐，别单独挑图标和配色
+  AGENT_PROFILE: { icon: Orbit, className: "bg-[#eef2ff] text-[#6366F1]" },
+  KNOWLEDGE_BASE: { icon: Database, className: "bg-[#e6f7ff] text-[#1890FF]" },
+  KNOWLEDGE_DOCUMENT: { icon: FileText, className: "bg-[#f0f5ff] text-[#2F54EB]" },
+  KNOWLEDGE_CHUNK: { icon: Boxes, className: "bg-[#e6fffb] text-[#13C2C2]" },
+  INGESTION_PIPELINE: { icon: Workflow, className: "bg-[#fff7e6] text-[#FA8C16]" },
+  INGESTION_TASK: { icon: ListChecks, className: "bg-[#fffbe6] text-[#D48806]" },
+  INTENT_TREE: { icon: Network, className: "bg-[#f9f0ff] text-[#722ED1]" },
+  QUERY_TERM_MAPPING: { icon: Tags, className: "bg-[#fff0f6] text-[#EB2F96]" },
+  SAMPLE_QUESTION: { icon: MessagesSquare, className: "bg-[#f6ffed] text-[#52C41A]" },
+  USER: { icon: User, className: "bg-[#fff2e8] text-[#FA541C]" }
 };
 
 // 操作类型使用语义化配色，与结果列的圆点样式区分开
@@ -153,34 +149,26 @@ const operationBadgeClass = (operationType?: string | null) => {
   switch (operationType) {
     case "CREATE":
     case "ENABLE":
-      return "admin-badge--success";
+      return "border-[#b7eb8f] bg-[#f6ffed] text-[#52C41A]";
     case "UPDATE":
-      return "admin-badge--accent";
+      return "border-[#91d5ff] bg-[#e6f7ff] text-[#1890FF]";
     case "DELETE":
-      return "admin-badge--danger";
+      return "border-[#ffa39e] bg-[#fff1f0] text-[#F5222D]";
     case "DISABLE":
-      return "admin-badge--neutral";
+      return "border-[#d9d9d9] bg-[#fafafa] text-[#8c8c8c]";
     case "RUN":
-      return "admin-badge--secondary";
+      return "border-[#ffd591] bg-[#fff7e6] text-[#FA8C16]";
     default:
-      return "admin-badge--neutral";
+      return "border-slate-200 bg-slate-50 text-slate-600";
   }
 };
 
 function BizTypeCell({ bizType }: { bizType?: string | null }) {
-  const meta = (bizType && BIZ_TYPE_META[bizType]) || {
-    icon: Boxes,
-    className: "bg-slate-100 text-slate-500"
-  };
+  const meta = (bizType && BIZ_TYPE_META[bizType]) || { icon: Boxes, className: "bg-slate-100 text-slate-500" };
   const Icon = meta.icon;
   return (
     <div className="flex items-center gap-2.5">
-      <span
-        className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
-          meta.className
-        )}
-      >
+      <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", meta.className)}>
         <Icon className="h-[18px] w-[18px]" />
       </span>
       <span className="font-medium text-slate-700">{labelOf(BIZ_TYPE_OPTIONS, bizType)}</span>
@@ -226,11 +214,7 @@ function JsonScalar({ value }: { value: unknown }) {
     return <span className="italic text-slate-400">null</span>;
   }
   if (typeof value === "string") {
-    return (
-      <span className="whitespace-pre-wrap break-all text-emerald-700">
-        {value === "" ? '""' : value}
-      </span>
-    );
+    return <span className="whitespace-pre-wrap break-all text-emerald-700">{value === "" ? '""' : value}</span>;
   }
   if (typeof value === "number") {
     return <span className="text-blue-600">{value}</span>;
@@ -312,9 +296,7 @@ function ChangeDiffTable({ detail }: { detail: BizChangeLog | null }) {
         <TableBody>
           {diffItems.map((item, index) => (
             <TableRow key={`${item.field || "field"}-${index}`}>
-              <TableCell className="font-mono text-xs text-slate-600">
-                {item.field || "/"}
-              </TableCell>
+              <TableCell className="font-mono text-xs text-slate-600">{item.field || "/"}</TableCell>
               <TableCell className="max-w-[260px] break-words font-mono text-xs">
                 <JsonView data={item.before} />
               </TableCell>
@@ -352,11 +334,7 @@ function CopyButton({ value, label = "复制" }: { value: string; label?: string
       aria-label={label}
       className="h-7 gap-1.5 px-2 text-xs text-slate-500 hover:text-slate-800"
     >
-      {copied ? (
-        <Check className="h-3.5 w-3.5 text-emerald-600" />
-      ) : (
-        <Copy className="h-3.5 w-3.5" />
-      )}
+      {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
       {copied ? "已复制" : label}
     </Button>
   );
@@ -410,7 +388,7 @@ function JsonCodeBlock({ value }: { value?: string | null }) {
             lineHeight: "1.5"
           }}
           codeTagProps={{ style: { background: "transparent" } }}
-          lineNumberStyle={{ minWidth: "2.5em", color: "var(--text-muted)" }}
+          lineNumberStyle={{ minWidth: "2.5em", color: "#cbd5e1" }}
         >
           {text}
         </SyntaxHighlighter>
@@ -530,64 +508,43 @@ export function BizChangeLogPage() {
         <div className="flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center">
           <Select
             value={filters.bizType || ALL_VALUE}
-            onValueChange={(value) =>
-              setFilters((prev) => ({ ...prev, bizType: value === ALL_VALUE ? "" : value }))
-            }
+            onValueChange={(value) => setFilters((prev) => ({ ...prev, bizType: value === ALL_VALUE ? "" : value }))}
           >
-            <SelectTrigger
-              aria-label="业务类型筛选"
-              className={cn("w-[136px]", FILTER_SELECT_TRIGGER_CLASS)}
-            >
+            <SelectTrigger aria-label="业务类型筛选" className={cn("w-[136px]", FILTER_SELECT_TRIGGER_CLASS)}>
               <SelectValue placeholder="全部业务" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL_VALUE}>全部业务</SelectItem>
               {BIZ_TYPE_OPTIONS.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
+                <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Select
             value={filters.operationType || ALL_VALUE}
-            onValueChange={(value) =>
-              setFilters((prev) => ({ ...prev, operationType: value === ALL_VALUE ? "" : value }))
-            }
+            onValueChange={(value) => setFilters((prev) => ({ ...prev, operationType: value === ALL_VALUE ? "" : value }))}
           >
-            <SelectTrigger
-              aria-label="操作类型筛选"
-              className={cn("w-[120px]", FILTER_SELECT_TRIGGER_CLASS)}
-            >
+            <SelectTrigger aria-label="操作类型筛选" className={cn("w-[120px]", FILTER_SELECT_TRIGGER_CLASS)}>
               <SelectValue placeholder="全部操作" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL_VALUE}>全部操作</SelectItem>
               {OPERATION_OPTIONS.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
+                <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Select
             value={filters.success || ALL_VALUE}
-            onValueChange={(value) =>
-              setFilters((prev) => ({ ...prev, success: value === ALL_VALUE ? "" : value }))
-            }
+            onValueChange={(value) => setFilters((prev) => ({ ...prev, success: value === ALL_VALUE ? "" : value }))}
           >
-            <SelectTrigger
-              aria-label="结果筛选"
-              className={cn("w-[112px]", FILTER_SELECT_TRIGGER_CLASS)}
-            >
+            <SelectTrigger aria-label="结果筛选" className={cn("w-[112px]", FILTER_SELECT_TRIGGER_CLASS)}>
               <SelectValue placeholder="全部结果" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL_VALUE}>全部结果</SelectItem>
               {SUCCESS_OPTIONS.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
+                <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -601,9 +558,7 @@ export function BizChangeLogPage() {
           <Input
             className={cn("w-[144px]", FILTER_INPUT_CLASS)}
             value={filters.operatorName}
-            onChange={(event) =>
-              setFilters((prev) => ({ ...prev, operatorName: event.target.value }))
-            }
+            onChange={(event) => setFilters((prev) => ({ ...prev, operatorName: event.target.value }))}
             onKeyDown={(event) => event.key === "Enter" && handleSearch()}
             placeholder="操作人"
           />
@@ -612,9 +567,7 @@ export function BizChangeLogPage() {
               type="date"
               value={filters.beginTime}
               max={filters.endTime || undefined}
-              onChange={(event) =>
-                setFilters((prev) => ({ ...prev, beginTime: event.target.value }))
-              }
+              onChange={(event) => setFilters((prev) => ({ ...prev, beginTime: event.target.value }))}
               className="w-[116px] bg-transparent px-1 text-sm text-slate-600 focus:outline-none"
             />
             <span className="px-0.5 text-slate-300">~</span>
@@ -655,7 +608,7 @@ export function BizChangeLogPage() {
                   <TableHead className="w-[140px]">操作人</TableHead>
                   <TableHead className="w-[90px]">结果</TableHead>
                   <TableHead className="w-[150px]">时间</TableHead>
-                  <TableHead className="sticky right-0 z-20 w-[168px] border-l border-border bg-muted text-left shadow-none">
+                  <TableHead className="sticky right-0 z-20 w-[168px] bg-[#F9FAFB] text-left shadow-[-1px_0_0_rgba(226,232,240,1)]">
                     详情
                   </TableHead>
                 </TableRow>
@@ -668,42 +621,28 @@ export function BizChangeLogPage() {
                     </TableCell>
                     <TableCell className="font-mono text-xs text-slate-600">{item.bizId}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn("font-medium", operationBadgeClass(item.operationType))}
-                      >
+                      <Badge variant="outline" className={cn("font-medium", operationBadgeClass(item.operationType))}>
                         {labelOf(OPERATION_OPTIONS, item.operationType)}
                       </Badge>
                     </TableCell>
-                    <TableCell
-                      className="max-w-[320px] truncate text-slate-700"
-                      title={item.actionDesc || ""}
-                    >
+                    <TableCell className="max-w-[320px] truncate text-slate-700" title={item.actionDesc || ""}>
                       {item.actionDesc || "-"}
                     </TableCell>
                     <TableCell>
-                      <span
-                        className="block truncate text-slate-700"
-                        title={item.operatorName || item.operatorId || ""}
-                      >
+                      <span className="block truncate text-slate-700" title={item.operatorName || item.operatorId || ""}>
                         {item.operatorName || item.operatorId || "-"}
                       </span>
                     </TableCell>
                     <TableCell>
                       <span className="inline-flex items-center gap-1.5">
-                        <span
-                          className={cn(
-                            "h-1.5 w-1.5 rounded-full",
-                            item.success ? "bg-[var(--success)]" : "bg-[var(--error)]"
-                          )}
-                        />
+                        <span className={cn("h-1.5 w-1.5 rounded-full", item.success ? "bg-[#52C41A]" : "bg-[#F5222D]")} />
                         <span className="text-slate-700">{item.success ? "成功" : "失败"}</span>
                       </span>
                     </TableCell>
                     <TableCell>
                       <RelativeTime value={item.createTime} />
                     </TableCell>
-                    <TableCell className="sticky right-0 z-10 border-l border-border bg-card shadow-none group-hover:bg-muted">
+                    <TableCell className="sticky right-0 z-10 bg-white shadow-[-1px_0_0_rgba(226,232,240,1)] group-hover:bg-slate-50">
                       <div className="flex items-center gap-2">
                         <Button
                           size="sm"
@@ -760,12 +699,7 @@ export function BizChangeLogPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPageNo(1)}
-              disabled={current <= 1}
-            >
+            <Button variant="outline" size="sm" onClick={() => setPageNo(1)} disabled={current <= 1}>
               首页
             </Button>
             <Button
@@ -787,12 +721,7 @@ export function BizChangeLogPage() {
             >
               下一页
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPageNo(pages || 1)}
-              disabled={current >= pages}
-            >
+            <Button variant="outline" size="sm" onClick={() => setPageNo(pages || 1)} disabled={current >= pages}>
               末页
             </Button>
           </div>
@@ -807,9 +736,7 @@ export function BizChangeLogPage() {
               审计详情
             </DialogTitle>
             <DialogDescription>
-              {detail
-                ? `${labelOf(BIZ_TYPE_OPTIONS, detail.bizType)} · ${detail.bizId}`
-                : "加载变更快照"}
+              {detail ? `${labelOf(BIZ_TYPE_OPTIONS, detail.bizType)} · ${detail.bizId}` : "加载变更快照"}
             </DialogDescription>
           </DialogHeader>
           {detailLoading ? (

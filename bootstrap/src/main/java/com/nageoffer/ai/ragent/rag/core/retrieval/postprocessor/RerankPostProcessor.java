@@ -97,8 +97,12 @@ public class RerankPostProcessor implements SearchResultPostProcessor {
                 after.size(),
                 ChannelAttribution.format(ChannelAttribution.countByChannel(after, index)));
 
-        long graphIn = ChannelAttribution.countOfChannel(before, index, SearchChannelType.GRAPH);
-        if (graphIn > 0) {
+        // 按图谱通道在场判断而非 graphIn > 0：0/0 恰是最需要看见的形态——图谱召回了却在融合截断处全军覆没，
+        // 按输入量守门会让这行日志在事故发生时恒沉默
+        boolean graphChannelPresent = results.stream()
+                .anyMatch(result -> result.getChannelType() == SearchChannelType.GRAPH);
+        if (graphChannelPresent) {
+            long graphIn = ChannelAttribution.countOfChannel(before, index, SearchChannelType.GRAPH);
             long graphOut = ChannelAttribution.countOfChannel(after, index, SearchChannelType.GRAPH);
             log.info("检索归因 - 图谱证据存活: {}/{}", graphOut, graphIn);
         }

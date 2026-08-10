@@ -23,6 +23,7 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.nageoffer.ai.ragent.framework.convention.RetrievedChunk;
 import com.nageoffer.ai.ragent.rag.config.KeywordProperties;
 import lombok.Getter;
@@ -97,6 +98,7 @@ public class EsKeywordRetrieverService implements KeywordRetrieverService {
         return RetrievedChunk.builder()
                 .id(hit.id())
                 .text(content)
+                .collectionName(source == null ? null : source.getCollectionName())
                 .score(score)
                 .build();
     }
@@ -107,5 +109,8 @@ public class EsKeywordRetrieverService implements KeywordRetrieverService {
     private static class KeywordHitDocument {
 
         private String content;
+
+        @JsonProperty("collection_name")
+        private String collectionName;
     }
 }

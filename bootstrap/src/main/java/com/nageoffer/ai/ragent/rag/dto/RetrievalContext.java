@@ -24,6 +24,7 @@ import lombok.Data;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 检索上下文（MCP + KB 结果的统一承载）
@@ -46,6 +47,12 @@ public class RetrievalContext {
      * 意图 ID -> 分片列表
      */
     private Map<String, List<RetrievedChunk>> intentChunks;
+
+    /**
+     * 允许参与模板选择和规则注入的意图 ID
+     */
+    @Builder.Default
+    private Set<String> eligibleIntentIds = Set.of();
 
     /**
      * 是否存在 MCP 上下文
