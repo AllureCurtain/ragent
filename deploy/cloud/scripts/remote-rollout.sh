@@ -20,6 +20,21 @@ fi
 : "${MCP_IMAGE:?MCP_IMAGE is required}"
 : "${WEB_IMAGE:?WEB_IMAGE is required}"
 
+# The host's ~/.docker/config.json may carry a desktop-only proxy (host.docker.internal:7891)
+# that is unreachable on this Linux host and hangs every docker pull/login. Strip it defensively.
+if [ -f "$HOME/.docker/config.json" ] && python3 - <<'PY' 2>/dev/null; then
+import json, os, sys
+p = os.path.expanduser('~/.docker/config.json')
+d = json.load(open(p))
+if 'proxies' in d:
+    del d['proxies']
+    json.dump(d, open(p, 'w'), indent=2)
+    sys.exit(0)  # changed
+sys.exit(1)  # no change
+PY
+echo '==> removed unreachable docker proxy from ~/.docker/config.json'
+fi
+
 echo "==> Rolling out tag=${IMAGE_TAG}"
 echo "    backend=${BACKEND_IMAGE}:${IMAGE_TAG}"
 echo "    mcp=${MCP_IMAGE}:${IMAGE_TAG}"
